@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ИСПРАВЛЕННАЯ ВЕРСИЯ
+MHDDoS БОТ — ВЕБХУК ВЕРСИЯ (обход блокировок)
 """
 
 import asyncio
@@ -19,12 +19,20 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 # ==============================
 #  КОНФИГ
 # ==============================
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
+
+# URL вашего сервиса на Railway (замените на свой после деплоя)
+# Вы можете узнать его в настройках Railway (обычно https://<project-name>.railway.app)
+# Пока оставьте заполнитель, потом замените в переменных окружения
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://llosdfisojdfouisdf.railway.app")  # Или задайте через переменную окружения
 
 MH_DDOS_PATH = "start.py"
 PROXIES_FILE = "proxies.txt"
@@ -117,7 +125,7 @@ def is_admin(user_id):
     return user_id in ADMINS
 
 # ==============================
-#  ПРОКСИ
+#  ПРОКСИ (СБОР)
 # ==============================
 PROXY_SOURCES = [
     "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/http.txt",
@@ -344,7 +352,7 @@ async def safe_edit(message, text, parse_mode="HTML", reply_markup=None):
     try:
         await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        if "message is not modified" not in str(e):
+        if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
             raise
 
 # ==============================
@@ -490,7 +498,7 @@ async def method_choose(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ОБРАБОТЧИК ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ (ИСПРАВЛЕН)
+#  ОБРАБОТЧИК ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ
 # ==============================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
@@ -498,7 +506,7 @@ async def handle_text(message: types.Message):
     data = user_data.get(user_id, {})
     awaiting = data.get("awaiting")
     
-    # 1. Обработка выдачи подписки (если мы в состоянии give_tier)
+    # 1. Обработка выдачи подписки
     if awaiting == "give_tier":
         parts = message.text.strip().split()
         if len(parts) != 2:
@@ -518,7 +526,7 @@ async def handle_text(message: types.Message):
             await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
         except:
             pass
-        user_data.pop(user_id, None)  # сбрасываем состояние
+        user_data.pop(user_id, None)
         return
     
     # 2. Если ожидаем ввод URL
@@ -556,9 +564,6 @@ async def handle_text(message: types.Message):
             user_data[user_id].pop("awaiting")
             await show_confirm(message, user_id)
         return
-    
-    # 4. Любое другое сообщение — игнорируем (не распознаём как URL)
-    # (ничего не делаем)
 
 async def show_confirm(message, user_id):
     data = user_data[user_id]
@@ -759,7 +764,6 @@ async def admin_update_proxies(callback: types.CallbackQuery):
 async def admin_give(callback: types.CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
-    # Устанавливаем состояние ожидания ввода для выдачи подписки
     user_data[callback.from_user.id] = {"awaiting": "give_tier"}
     await safe_edit(
         callback.message,
@@ -770,11 +774,34 @@ async def admin_give(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ЗАПУСК
+#  ЗАПУСК (ВЕБХУК)
 # ==============================
+async def on_startup():
+    # Установка вебхука
+    await bot.set_webhook(f"{WEBHOOK_URL}/webhook")
+    print(f"✅ Webhook set to {WEBHOOK_URL}/webhook")
+
 async def main():
-    print("✅ Бот запущен. Всё работает.")
-    await dp.start_polling(bot)
+    # Создаём приложение aiohttp
+    app = web.Application()
+
+    # Настройка обработчика вебхука
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=None,  # можно установить для безопасности
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+
+    # Запуск приложения
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    await site.start()
+
+    print("✅ Бот запущен (вебхук).")
+    # Бесконечное ожидание
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
