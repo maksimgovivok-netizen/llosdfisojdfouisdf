@@ -33,8 +33,8 @@ PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
 
-# !!! ЗАМЕНИТЕ НА ВАШ URL, КОТОРЫЙ ВЫ ПОЛУЧИЛИ НА RAILWAY !!!
-WEBHOOK_URL = "https://llosdfisojdfouisdf.up.railway.app/webhook"
+# ВАШ URL (уже вставлен)
+WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 
 try:
     from fake_useragent import UserAgent
@@ -362,7 +362,7 @@ dp = Dispatcher()
 user_data = {}
 
 # ==============================
-#  ОБРАБОТЧИКИ (все такие же как раньше)
+#  ОБРАБОТЧИКИ
 # ==============================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -756,7 +756,6 @@ async def admin_give(callback: types.CallbackQuery):
 #  ВЕБХУК-СЕРВЕР
 # ==============================
 async def handle_webhook(request):
-    """Обработчик POST-запросов от Telegram"""
     try:
         update_data = await request.json()
         update = types.Update(**update_data)
@@ -767,31 +766,20 @@ async def handle_webhook(request):
         return web.Response(status=500)
 
 async def on_startup():
-    """Устанавливает вебхук при запуске"""
     await bot.delete_webhook()
     await bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Вебхук установлен на {WEBHOOK_URL}")
 
-# ==============================
-#  ЗАПУСК
-# ==============================
 async def main():
-    # Устанавливаем вебхук
     await on_startup()
     print("✅ Бот запущен через вебхук")
-
-    # Создаём aiohttp приложение
     app = web.Application()
     app.router.add_post("/webhook", handle_webhook)
-
-    # Запускаем сервер на порту 8080 (Railway ожидает этот порт)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=8080)
     await site.start()
     print("🚀 Сервер запущен на порту 8080")
-
-    # Держим сервер активным
     while True:
         await asyncio.sleep(3600)
 
