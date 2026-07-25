@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ВЕБХУК ВЕРСИЯ (обход блокировок)
+MHDDoS БОТ — ВЕБХУК (обход блокировки)
 """
 
 import asyncio
@@ -20,8 +20,6 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
 
 # ==============================
 #  КОНФИГ
@@ -29,15 +27,15 @@ from aiohttp import web
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
 
-# URL вашего сервиса на Railway (замените на свой после деплоя)
-# Вы можете узнать его в настройках Railway (обычно https://<project-name>.railway.app)
-# Пока оставьте заполнитель, потом замените в переменных окружения
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://llosdfisojdfouisdf.railway.app")  # Или задайте через переменную окружения
-
 MH_DDOS_PATH = "start.py"
 PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
+
+# URL вашего сервиса на Railway (укажите свой)
+# Он выглядит как https://llosdfisojdfouisdf.up.railway.app
+# Замените на свой реальный URL
+WEBHOOK_URL = "https://llosdfisojdfouisdf.up.railway.app/webhook"
 
 try:
     from fake_useragent import UserAgent
@@ -125,7 +123,7 @@ def is_admin(user_id):
     return user_id in ADMINS
 
 # ==============================
-#  ПРОКСИ (СБОР)
+#  ПРОКСИ
 # ==============================
 PROXY_SOURCES = [
     "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/http.txt",
@@ -352,13 +350,16 @@ async def safe_edit(message, text, parse_mode="HTML", reply_markup=None):
     try:
         await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
+        # Игнорируем ошибки, если сообщение уже удалено или не изменилось
+        if "message is not modified" in str(e) or "message to edit not found" in str(e):
+            pass
+        else:
             raise
 
 # ==============================
 #  БОТ
 # ==============================
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, connect_timeout=120, read_timeout=120)
 dp = Dispatcher()
 user_data = {}
 
@@ -774,34 +775,22 @@ async def admin_give(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ЗАПУСК (ВЕБХУК)
+#  ЗАПУСК
 # ==============================
-async def on_startup():
-    # Установка вебхука
-    await bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-    print(f"✅ Webhook set to {WEBHOOK_URL}/webhook")
-
 async def main():
-    # Создаём приложение aiohttp
+    # Устанавливаем вебхук
+    await bot.delete_webhook()
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Вебхук установлен на {WEBHOOK_URL}")
+    print("✅ Бот запущен. Всё работает.")
+
+    # Запускаем веб-сервер для приёма обновлений
+    from aiohttp import web
     app = web.Application()
+    app.router.add_post("/webhook", lambda request: web.Response(text="OK"))
 
-    # Настройка обработчика вебхука
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=None,  # можно установить для безопасности
-    )
-    webhook_requests_handler.register(app, path="/webhook")
-
-    # Запуск приложения
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-    await site.start()
-
-    print("✅ Бот запущен (вебхук).")
-    # Бесконечное ожидание
-    await asyncio.Event().wait()
+    # Запускаем обработку обновлений через вебхук
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
