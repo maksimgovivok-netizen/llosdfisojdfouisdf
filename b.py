@@ -15,12 +15,12 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 
-from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiohttp import web
 
 # ==============================
 #  КОНФИГ
@@ -33,8 +33,7 @@ PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
 
-# ВАЖНО: замените на ваш реальный URL от Railway
-# Он выглядит как https://llosdfisojdfouisdf.up.railway.app
+# !!! ЗАМЕНИТЕ НА ВАШ URL, КОТОРЫЙ ВЫ ПОЛУЧИЛИ НА RAILWAY !!!
 WEBHOOK_URL = "https://llosdfisojdfouisdf.up.railway.app/webhook"
 
 try:
@@ -363,7 +362,7 @@ dp = Dispatcher()
 user_data = {}
 
 # ==============================
-#  СТАРТ
+#  ОБРАБОТЧИКИ (все такие же как раньше)
 # ==============================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -376,9 +375,6 @@ async def start_cmd(message: types.Message):
         reply_markup=main_menu()
     )
 
-# ==============================
-#  НАВИГАЦИЯ
-# ==============================
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery):
     await safe_edit(callback.message, "🌟 Главное меню", reply_markup=main_menu())
@@ -421,9 +417,6 @@ async def status_cmd(callback: types.CallbackQuery):
         await safe_edit(callback.message, "✅ Активных атак нет.", reply_markup=main_menu())
     await callback.answer()
 
-# ==============================
-#  ПОДПИСКИ
-# ==============================
 @dp.callback_query(F.data == "buy_tier")
 async def buy_tier(callback: types.CallbackQuery):
     await safe_edit(
@@ -473,9 +466,6 @@ async def my_tier(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ==============================
-#  АТАКА
-# ==============================
 @dp.callback_query(F.data == "attack_start")
 async def attack_start(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -497,16 +487,12 @@ async def method_choose(callback: types.CallbackQuery):
     await safe_edit(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
     await callback.answer()
 
-# ==============================
-#  ОБРАБОТЧИК ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ
-# ==============================
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
     data = user_data.get(user_id, {})
     awaiting = data.get("awaiting")
     
-    # 1. Обработка выдачи подписки
     if awaiting == "give_tier":
         parts = message.text.strip().split()
         if len(parts) != 2:
@@ -529,7 +515,6 @@ async def handle_text(message: types.Message):
         user_data.pop(user_id, None)
         return
     
-    # 2. Если ожидаем ввод URL
     if user_id in user_data and "method" in user_data[user_id] and "url" not in user_data[user_id]:
         url = message.text.strip()
         if not url.startswith("http"):
@@ -538,7 +523,6 @@ async def handle_text(message: types.Message):
         await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
         return
     
-    # 3. Если ожидаем ввод чисел (потоки или длительность)
     if awaiting in ("threads", "duration"):
         try:
             val = int(message.text.strip())
@@ -630,7 +614,6 @@ async def confirm_launch(callback: types.CallbackQuery):
         await safe_edit(callback.message, "❌ Ошибка: не хватает данных.", reply_markup=main_menu())
         await callback.answer()
         return
-    # Проверка тарифа
     tier = get_user(user_id)["tier"]
     if threads > TIERS[tier]["max_threads"] or duration > TIERS[tier]["max_duration"]:
         await safe_edit(
@@ -640,7 +623,6 @@ async def confirm_launch(callback: types.CallbackQuery):
         )
         await callback.answer()
         return
-    # Запуск атаки
     loading = await callback.message.edit_text("🔄 Загружаю прокси... Подождите 20-40 сек.", parse_mode="HTML")
     try:
         process = await run_attack(user_id, method, url, threads, duration)
@@ -713,9 +695,6 @@ async def stop_attack_cmd(callback: types.CallbackQuery):
         await safe_edit(callback.message, "❌ Нет активной атаки.", reply_markup=main_menu())
     await callback.answer()
 
-# ==============================
-#  АДМИН-ПАНЕЛЬ
-# ==============================
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: types.CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -774,35 +753,47 @@ async def admin_give(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ЗАПУСК (ВЕБХУК)
+#  ВЕБХУК-СЕРВЕР
 # ==============================
-async def main():
-    # Устанавливаем вебхук
+async def handle_webhook(request):
+    """Обработчик POST-запросов от Telegram"""
+    try:
+        update_data = await request.json()
+        update = types.Update(**update_data)
+        await dp.process_update(bot, update)
+        return web.Response(text="OK")
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return web.Response(status=500)
+
+async def on_startup():
+    """Устанавливает вебхук при запуске"""
     await bot.delete_webhook()
     await bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Вебхук установлен на {WEBHOOK_URL}")
 
-    # Создаём веб-приложение для приёма обновлений
+# ==============================
+#  ЗАПУСК
+# ==============================
+async def main():
+    # Устанавливаем вебхук
+    await on_startup()
+    print("✅ Бот запущен через вебхук")
+
+    # Создаём aiohttp приложение
     app = web.Application()
-    
-    # Обработчик вебхука
-    async def webhook_handler(request):
-        update_data = await request.json()
-        update = types.Update(**update_data)
-        await dp.process_update(update)
-        return web.Response(text="OK")
-    
-    app.router.add_post("/webhook", webhook_handler)
-    
-    # Запускаем веб-сервер
+    app.router.add_post("/webhook", handle_webhook)
+
+    # Запускаем сервер на порту 8080 (Railway ожидает этот порт)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    site = web.TCPSite(runner, host="0.0.0.0", port=8080)
     await site.start()
-    print("✅ Веб-сервер запущен на порту 8080")
-    
-    # Держим сервер работающим
-    await asyncio.Event().wait()
+    print("🚀 Сервер запущен на порту 8080")
+
+    # Держим сервер активным
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
