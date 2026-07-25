@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ВЕБХУК + АВТОЗАГРУЗКА MHDDoS (исправлено)
+MHDDoS БОТ — ВЕБХУК (все ошибки исправлены)
 """
 
 import asyncio
@@ -44,7 +44,7 @@ except:
     UA_AVAILABLE = False
 
 # ==============================
-#  АВТОЗАГРУЗКА MHDDOS (исправлена)
+#  АВТОЗАГРУЗКА MHDDOS
 # ==============================
 def ensure_mhddos():
     if os.path.exists(MH_DDOS_PATH):
@@ -376,15 +376,25 @@ def confirm_menu():
     ])
 
 # ==============================
-#  БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ (добавлена обработка query is too old)
+#  БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ И ОТПРАВКА
 # ==============================
-async def safe_edit(message, text, parse_mode="HTML", reply_markup=None):
+async def safe_edit(message, text, parse_mode=None, reply_markup=None):
     try:
         await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        # Игнорируем ошибки, связанные с редактированием
-        if "message is not modified" in str(e) or "message to edit not found" in str(e) or "query is too old" in str(e):
+        if "message is not modified" in str(e) or "message to edit not found" in str(e):
             pass
+        else:
+            raise
+
+async def safe_send_message(chat_id, text, parse_mode=None, reply_markup=None):
+    """Отправляет сообщение, обрабатывая ошибки парсинга"""
+    try:
+        await bot.send_message(chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup)
+    except Exception as e:
+        if "can't parse entities" in str(e):
+            # Если не парсится, отправляем без разметки
+            await bot.send_message(chat_id, text, parse_mode=None, reply_markup=reply_markup)
         else:
             raise
 
@@ -412,17 +422,17 @@ async def start_cmd(message: types.Message):
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery):
     await callback.answer()
-    await safe_edit(callback.message, "🌟 Главное меню", reply_markup=main_menu())
+    await safe_edit(callback.message, "🌟 Главное меню", parse_mode="HTML", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "back_method")
 async def back_method(callback: types.CallbackQuery):
     await callback.answer()
-    await safe_edit(callback.message, "🎯 Выберите метод:", reply_markup=method_menu())
+    await safe_edit(callback.message, "🎯 Выберите метод:", parse_mode="HTML", reply_markup=method_menu())
 
 @dp.callback_query(F.data == "back_threads")
 async def back_threads(callback: types.CallbackQuery):
     await callback.answer()
-    await safe_edit(callback.message, "🧵 Выберите потоки:", reply_markup=threads_menu())
+    await safe_edit(callback.message, "🧵 Выберите потоки:", parse_mode="HTML", reply_markup=threads_menu())
 
 @dp.callback_query(F.data == "help")
 async def help_cmd(callback: types.CallbackQuery):
@@ -431,6 +441,7 @@ async def help_cmd(callback: types.CallbackQuery):
         callback.message,
         "📖 <b>Помощь</b>\n\n🚀 Запустить атаку — выбери метод, URL, потоки, длительность.\n"
         "⏹️ Остановить атаку.\n📊 Статус.\n\n⚠️ Используй только на своих ресурсах!",
+        parse_mode="HTML",
         reply_markup=main_menu()
     )
 
@@ -446,11 +457,12 @@ async def status_cmd(callback: types.CallbackQuery):
             callback.message,
             f"🏃 <b>Атака выполняется</b>\n\n⏱️ Прошло: {int(elapsed)} сек\n⏳ Осталось: {int(remaining)} сек\n"
             f"📌 Метод: {data['method']}\n🎯 {data['url']}",
+            parse_mode="HTML",
             reply_markup=main_menu()
         )
     else:
         await callback.answer()
-        await safe_edit(callback.message, "✅ Активных атак нет.", reply_markup=main_menu())
+        await safe_edit(callback.message, "✅ Активных атак нет.", parse_mode="HTML", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "buy_tier")
 async def buy_tier(callback: types.CallbackQuery):
@@ -458,6 +470,7 @@ async def buy_tier(callback: types.CallbackQuery):
     await safe_edit(
         callback.message,
         "💎 <b>Купить подписку</b>\n\nВыбери тариф. Для оплаты напиши @pasybos.",
+        parse_mode="HTML",
         reply_markup=buy_tier_menu()
     )
 
@@ -468,12 +481,13 @@ async def tier_select(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     if tier == "free":
         set_user_tier(user_id, "free")
-        await safe_edit(callback.message, "🐢 Бесплатный тариф активирован!", reply_markup=main_menu())
+        await safe_edit(callback.message, "🐢 Бесплатный тариф активирован!", parse_mode="HTML", reply_markup=main_menu())
     else:
         price = 400 if tier == "medium" else 799
         await safe_edit(
             callback.message,
             f"💎 Вы выбрали {TIERS[tier]['name']} — {price} ₽\n\nНапиши @pasybos для оплаты.",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📩 Написать @pasybos", url="https://t.me/pasybos")],
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")]
@@ -497,6 +511,7 @@ async def my_tier(callback: types.CallbackQuery):
         callback.message,
         f"👤 <b>Твой тариф</b>\n\n📌 {tier_info['name']}\n🧵 Макс. потоков: {tier_info['max_threads']}\n"
         f"⏱️ Макс. длительность: {tier_info['max_duration']} сек\n📅 {expiry_text}",
+        parse_mode="HTML",
         reply_markup=main_menu()
     )
 
@@ -507,19 +522,19 @@ async def attack_start(callback: types.CallbackQuery):
         await callback.answer("⚠️ Уже есть активная атака!", show_alert=True)
         return
     await callback.answer()
-    await safe_edit(callback.message, "🎯 Выберите метод:", reply_markup=method_menu())
+    await safe_edit(callback.message, "🎯 Выберите метод:", parse_mode="HTML", reply_markup=method_menu())
 
 @dp.callback_query(F.data == "method_other")
 async def method_other(callback: types.CallbackQuery):
     await callback.answer()
-    await safe_edit(callback.message, "🔧 Другие методы:", reply_markup=other_methods_menu())
+    await safe_edit(callback.message, "🔧 Другие методы:", parse_mode="HTML", reply_markup=other_methods_menu())
 
 @dp.callback_query(F.data.startswith("m_"))
 async def method_choose(callback: types.CallbackQuery):
     method = callback.data.split("_")[1]
     user_data[callback.from_user.id] = {"method": method}
     await callback.answer()
-    await safe_edit(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
+    await safe_edit(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", parse_mode="HTML", reply_markup=None)
 
 @dp.message(F.text)
 async def handle_text(message: types.Message):
@@ -554,7 +569,7 @@ async def handle_text(message: types.Message):
         if not url.startswith("http"):
             url = "https://" + url
         user_data[user_id]["url"] = url
-        await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
+        await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", parse_mode="HTML", reply_markup=threads_menu())
         return
     
     if awaiting in ("threads", "duration"):
@@ -571,7 +586,7 @@ async def handle_text(message: types.Message):
                 return
             user_data[user_id]["threads"] = val
             user_data[user_id].pop("awaiting")
-            await message.answer(f"🧵 Потоки: {val}\n\nВыберите длительность:", reply_markup=duration_menu())
+            await message.answer(f"🧵 Потоки: {val}\n\nВыберите длительность:", parse_mode="HTML", reply_markup=duration_menu())
         elif awaiting == "duration":
             tier = get_user(user_id)["tier"]
             max_dur = TIERS[tier]["max_duration"]
@@ -605,7 +620,7 @@ async def threads_choose(callback: types.CallbackQuery):
     val = callback.data.split("_")[1]
     if val == "custom":
         await callback.answer()
-        await safe_edit(callback.message, "🔢 Введите количество потоков:", reply_markup=None)
+        await safe_edit(callback.message, "🔢 Введите количество потоков:", parse_mode="HTML", reply_markup=None)
         user_data[user_id]["awaiting"] = "threads"
         return
     threads = int(val)
@@ -616,7 +631,7 @@ async def threads_choose(callback: types.CallbackQuery):
         return
     user_data[user_id]["threads"] = threads
     await callback.answer()
-    await safe_edit(callback.message, f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
+    await safe_edit(callback.message, f"🧵 Потоки: {threads}\n\nВыберите длительность:", parse_mode="HTML", reply_markup=duration_menu())
 
 @dp.callback_query(F.data.startswith("d_"))
 async def duration_choose(callback: types.CallbackQuery):
@@ -624,7 +639,7 @@ async def duration_choose(callback: types.CallbackQuery):
     val = callback.data.split("_")[1]
     if val == "custom":
         await callback.answer()
-        await safe_edit(callback.message, "⏱️ Введите длительность (сек):", reply_markup=None)
+        await safe_edit(callback.message, "⏱️ Введите длительность (сек):", parse_mode="HTML", reply_markup=None)
         user_data[user_id]["awaiting"] = "duration"
         return
     duration = int(val)
@@ -639,6 +654,7 @@ async def duration_choose(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "confirm_launch")
 async def confirm_launch(callback: types.CallbackQuery):
+    # Сначала отвечаем на callback
     await callback.answer()
     user_id = callback.from_user.id
     data = user_data.pop(user_id, {})
@@ -647,16 +663,18 @@ async def confirm_launch(callback: types.CallbackQuery):
     threads = data.get("threads")
     duration = data.get("duration")
     if not all([method, url, threads, duration]):
-        await safe_edit(callback.message, "❌ Ошибка: не хватает данных.", reply_markup=main_menu())
+        await safe_edit(callback.message, "❌ Ошибка: не хватает данных.", parse_mode="HTML", reply_markup=main_menu())
         return
     tier = get_user(user_id)["tier"]
     if threads > TIERS[tier]["max_threads"] or duration > TIERS[tier]["max_duration"]:
         await safe_edit(
             callback.message,
             f"⚠️ Твой тариф не позволяет такие параметры!\nМакс. потоки: {TIERS[tier]['max_threads']}, макс. время: {TIERS[tier]['max_duration']} сек.",
+            parse_mode="HTML",
             reply_markup=main_menu()
         )
         return
+    # Отправляем новое сообщение о загрузке
     loading_msg = await callback.message.answer("🔄 Загружаю прокси... Подождите 20-40 сек.", parse_mode="HTML")
     try:
         process = await run_attack(user_id, method, url, threads, duration)
@@ -678,7 +696,7 @@ async def confirm_launch(callback: types.CallbackQuery):
         }
         asyncio.create_task(monitor_attack(user_id))
     except Exception as e:
-        await safe_edit(callback.message, f"❌ Ошибка: {e}", reply_markup=main_menu())
+        await safe_edit(callback.message, f"❌ Ошибка: {e}", parse_mode="HTML", reply_markup=main_menu())
 
 async def monitor_attack(user_id):
     data = active_attacks.get(user_id)
@@ -702,6 +720,7 @@ async def monitor_attack(user_id):
                     f"🚀 <b>Атака выполняется</b>\n\n🎯 {data['method']}\n🌐 {data['url']}\n🧵 {data.get('threads', '?')}\n\n"
                     f"⏳ <b>Прогресс:</b> {progress}%\n⏱️ Прошло: {int(elapsed)} сек / {duration} сек\n⏳ Осталось: {int(remaining)} сек\n\n"
                     f"📊 Запросов: ~{int(elapsed * 100)}",
+                    parse_mode="HTML",
                     reply_markup=main_menu()
                 )
             except:
@@ -710,14 +729,14 @@ async def monitor_attack(user_id):
         await asyncio.sleep(1)
     stdout, stderr = process.communicate()
     output = stdout or stderr
-    report = output[-1000:] if output else "Атака завершена."
-    # Экранируем HTML-символы в отчёте
-    safe_report = html.escape(report)
-    final = f"✅ <b>Атака завершена!</b>\n\n📊 <b>Отчёт:</b>\n<code>{safe_report}</code>"
+    # Экранируем HTML-символы для безопасной отправки
+    report = html.escape(output[-1000:] if output else "Атака завершена без вывода.")
+    final = f"✅ <b>Атака завершена!</b>\n\n📊 <b>Отчёт:</b>\n<code>{report}</code>"
     try:
-        await safe_edit(msg, final, reply_markup=main_menu())
-    except:
-        await bot.send_message(user_id, final, parse_mode="HTML", reply_markup=main_menu())
+        await safe_edit(msg, final, parse_mode="HTML", reply_markup=main_menu())
+    except Exception as e:
+        # Если не удалось отредактировать, отправляем новое сообщение
+        await safe_send_message(user_id, final, parse_mode="HTML", reply_markup=main_menu())
     if user_id in active_attacks:
         del active_attacks[user_id]
 
@@ -726,10 +745,10 @@ async def stop_attack_cmd(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     if await stop_attack(user_id):
         await callback.answer()
-        await safe_edit(callback.message, "🛑 Атака остановлена.", reply_markup=main_menu())
+        await safe_edit(callback.message, "🛑 Атака остановлена.", parse_mode="HTML", reply_markup=main_menu())
     else:
         await callback.answer()
-        await safe_edit(callback.message, "❌ Нет активной атаки.", reply_markup=main_menu())
+        await safe_edit(callback.message, "❌ Нет активной атаки.", parse_mode="HTML", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: types.CallbackQuery):
@@ -737,7 +756,7 @@ async def admin_panel(callback: types.CallbackQuery):
         await callback.answer("⛔ Нет прав!", show_alert=True)
         return
     await callback.answer()
-    await safe_edit(callback.message, "👑 Админ-панель", reply_markup=admin_menu())
+    await safe_edit(callback.message, "👑 Админ-панель", parse_mode="HTML", reply_markup=admin_menu())
 
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
@@ -760,6 +779,7 @@ async def admin_stats(callback: types.CallbackQuery):
         f"📊 <b>Статистика</b>\n\n👥 Пользователей: {total}\n⭐ Звёзд: {stars}\n⚡ Активных атак: {attacks}\n"
         f"🔄 Прокси: {proxy_count}\n🌐 User-Agent: {len(USER_AGENTS)}\n\n"
         f"📌 Тарифы:\n🐢 Бесплатных: {tiers['free']}\n⚡ Средних: {tiers['medium']}\n💥 Мощных: {tiers['pro']}",
+        parse_mode="HTML",
         reply_markup=admin_menu()
     )
 
@@ -768,12 +788,12 @@ async def admin_update_proxies(callback: types.CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
     await callback.answer()
-    await safe_edit(callback.message, "🔄 Обновляю прокси...", reply_markup=None)
+    await safe_edit(callback.message, "🔄 Обновляю прокси...", parse_mode="HTML", reply_markup=None)
     count = update_proxies()
     if count > 0:
-        await safe_edit(callback.message, f"✅ Прокси обновлены! Загружено {count} рабочих.", reply_markup=admin_menu())
+        await safe_edit(callback.message, f"✅ Прокси обновлены! Загружено {count} рабочих.", parse_mode="HTML", reply_markup=admin_menu())
     else:
-        await safe_edit(callback.message, "❌ Не удалось обновить прокси.", reply_markup=admin_menu())
+        await safe_edit(callback.message, "❌ Не удалось обновить прокси.", parse_mode="HTML", reply_markup=admin_menu())
 
 @dp.callback_query(F.data == "admin_give")
 async def admin_give(callback: types.CallbackQuery):
