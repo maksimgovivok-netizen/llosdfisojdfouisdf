@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MHDDoS БОТ — ВЕБХУК (обход блокировки)
+MHDDoS БОТ — ВЕБХУК (исправленный)
 """
 
 import asyncio
@@ -19,7 +19,6 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
 
 # ==============================
@@ -33,7 +32,6 @@ PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
 
-# ВАШ URL (уже вставлен)
 WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 
 try:
@@ -362,7 +360,7 @@ dp = Dispatcher()
 user_data = {}
 
 # ==============================
-#  ОБРАБОТЧИКИ
+#  ОБРАБОТЧИКИ (все такие же как раньше)
 # ==============================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -753,13 +751,13 @@ async def admin_give(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ВЕБХУК-СЕРВЕР
+#  ВЕБХУК-СЕРВЕР (исправлен)
 # ==============================
 async def handle_webhook(request):
     try:
         update_data = await request.json()
         update = types.Update(**update_data)
-        await dp.process_update(bot, update)
+        await dp.feed_update(bot, update)
         return web.Response(text="OK")
     except Exception as e:
         print(f"Webhook error: {e}")
