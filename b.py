@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -32,9 +33,8 @@ PROXIES_FILE = "proxies.txt"
 DATA_FILE = "users.json"
 UA_FILE = "user_agents.txt"
 
-# URL вашего сервиса на Railway (укажите свой)
+# ВАЖНО: замените на ваш реальный URL от Railway
 # Он выглядит как https://llosdfisojdfouisdf.up.railway.app
-# Замените на свой реальный URL
 WEBHOOK_URL = "https://llosdfisojdfouisdf.up.railway.app/webhook"
 
 try:
@@ -350,7 +350,6 @@ async def safe_edit(message, text, parse_mode="HTML", reply_markup=None):
     try:
         await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        # Игнорируем ошибки, если сообщение уже удалено или не изменилось
         if "message is not modified" in str(e) or "message to edit not found" in str(e):
             pass
         else:
@@ -775,22 +774,35 @@ async def admin_give(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==============================
-#  ЗАПУСК
+#  ЗАПУСК (ВЕБХУК)
 # ==============================
 async def main():
     # Устанавливаем вебхук
     await bot.delete_webhook()
     await bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Вебхук установлен на {WEBHOOK_URL}")
-    print("✅ Бот запущен. Всё работает.")
 
-    # Запускаем веб-сервер для приёма обновлений
-    from aiohttp import web
+    # Создаём веб-приложение для приёма обновлений
     app = web.Application()
-    app.router.add_post("/webhook", lambda request: web.Response(text="OK"))
-
-    # Запускаем обработку обновлений через вебхук
-    await dp.start_polling(bot)
+    
+    # Обработчик вебхука
+    async def webhook_handler(request):
+        update_data = await request.json()
+        update = types.Update(**update_data)
+        await dp.process_update(update)
+        return web.Response(text="OK")
+    
+    app.router.add_post("/webhook", webhook_handler)
+    
+    # Запускаем веб-сервер
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    await site.start()
+    print("✅ Веб-сервер запущен на порту 8080")
+    
+    # Держим сервер работающим
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
